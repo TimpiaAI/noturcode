@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 
+@MainActor
 final class NoturcodeUITests: XCTestCase {
     @MainActor
     func testDesktopConversationFirstWorkspace() throws {
