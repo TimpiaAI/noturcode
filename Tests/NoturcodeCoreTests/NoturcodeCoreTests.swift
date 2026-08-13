@@ -1007,6 +1007,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(source.contains("contents of"))
         XCTAssertTrue(source.contains("repeat with terminalSession in sessions of terminalTab"))
         XCTAssertTrue(source.contains("unique ID of current session of terminalTab"))
+        try requireITermScriptingDictionary()
         let script = try XCTUnwrap(NSAppleScript(source: source))
         var error: NSDictionary?
         XCTAssertTrue(script.compileAndReturnError(&error), "\(String(describing: error))")
@@ -1073,6 +1074,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(source.contains("activate"))
         XCTAssertFalse(source.contains("select terminal"))
         XCTAssertFalse(source.contains("write text"))
+        try requireITermScriptingDictionary()
         let script = try XCTUnwrap(NSAppleScript(source: source))
         var error: NSDictionary?
         XCTAssertTrue(script.compileAndReturnError(&error), "\(String(describing: error))")
@@ -1115,6 +1117,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(source.contains("select terminal"))
         XCTAssertFalse(source.contains("write text"))
         XCTAssertFalse(source.contains("set "))
+        try requireITermScriptingDictionary()
         let script = try XCTUnwrap(NSAppleScript(source: source))
         var error: NSDictionary?
         XCTAssertTrue(script.compileAndReturnError(&error), "\(String(describing: error))")
@@ -1135,12 +1138,14 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(source.contains("unique ID of terminalSession as text"))
         XCTAssertFalse(source.contains("activate"))
         XCTAssertFalse(source.contains("select terminal"))
+        try requireITermScriptingDictionary()
         let script = try XCTUnwrap(NSAppleScript(source: source))
         var error: NSDictionary?
         XCTAssertTrue(script.compileAndReturnError(&error), "\(String(describing: error))")
     }
 
     func testITermPromptHandlerExecutesWithoutCoercingITermApplication() throws {
+        try requireITermScriptingDictionary()
         let script = try XCTUnwrap(NSAppleScript(source: ITermPromptScript.source))
         var compileError: NSDictionary?
         XCTAssertTrue(script.compileAndReturnError(&compileError), "\(String(describing: compileError))")
@@ -1165,6 +1170,12 @@ final class NoturcodeCoreTests: XCTestCase {
         }
         XCTAssertNil(runtimeError, "\(String(describing: runtimeError))")
         XCTAssertEqual(result.stringValue, "MISSING")
+    }
+
+    private func requireITermScriptingDictionary() throws {
+        guard FileManager.default.fileExists(atPath: "/Applications/iTerm.app") else {
+            throw XCTSkip("iTerm2 is not installed; source-shape assertions still cover the generated script on CI.")
+        }
     }
 
     func testNotificationRoutePreservesExactSessionKey() {
