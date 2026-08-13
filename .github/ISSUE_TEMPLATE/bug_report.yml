@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a reproducible problem in Noturcode
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Noturcode. Remove secrets, source code, prompts, transcripts, and personal paths from anything you attach.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this problem.
+          required: true
+        - label: I reproduced this on the latest Noturcode release.
+          required: true
+        - label: I removed sensitive data from logs and screenshots.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Noturcode version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS and Mac model
+      placeholder: macOS 15.6, MacBook Pro 14-inch M3 Pro
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Agent, terminal, and environment
+      description: Include versions and note tmux, Zellij, SSH, IDE terminals, or external displays.
+      placeholder: Codex 0.x in iTerm2 3.x over SSH, two external displays
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start ...
+        2. Open ...
+        3. Click ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include the exact error text when available.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Drag in safe screenshots or logs. Do not include credentials or private transcripts.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context

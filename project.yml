@@ -1,0 +1,134 @@
+name: Noturcode
+options:
+  bundleIdPrefix: ro.noturcode
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+targets:
+  NoturcodeCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - Sources/NoturcodeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.core
+        PRODUCT_NAME: NoturcodeCore
+  NoturcodeBridge:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/NoturcodeBridge
+    dependencies:
+      - target: NoturcodeCore
+    settings:
+      base:
+        PRODUCT_NAME: noturcode-bridge
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.bridge
+        CODE_SIGNING_ALLOWED: false
+  Noturcode:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/NoturcodeApp
+      - path: Resources/Assets.xcassets
+        buildPhase: resources
+    dependencies:
+      - target: NoturcodeCore
+      - target: NoturcodeBridge
+    postBuildScripts:
+      - name: Assemble one-click integration payload
+        script: |
+          set -e
+          payload="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/IntegrationPayload"
+          mkdir -p "$payload/bin" "$payload/integrations"
+          cp "$BUILT_PRODUCTS_DIR/noturcode-bridge" "$payload/bin/noturcode-bridge"
+          cp "$SRCROOT/Integrations/claude-hooks.fragment.json" "$payload/integrations/"
+          cp "$SRCROOT/Integrations/codex-hooks.fragment.json" "$payload/integrations/"
+          cp "$SRCROOT/Integrations/gemini-hooks.fragment.json" "$payload/integrations/"
+          cp "$SRCROOT/Integrations/claude-nc-skill/SKILL.md" "$payload/integrations/claude-nc-skill.md"
+          cp "$SRCROOT/Integrations/noturcode-summary-skill/SKILL.md" "$payload/integrations/noturcode-summary-skill.md"
+          cp "$SRCROOT/Integrations/iterm2-ask-noturcode.py" "$payload/integrations/"
+          chmod 0755 "$payload/bin/noturcode-bridge"
+          chmod 0755 "$payload/integrations/iterm2-ask-noturcode.py"
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Noturcode
+        CFBundleName: Noturcode
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        CFBundleIconName: AppIcon
+        LSMinimumSystemVersion: "15.0"
+        NSHighResolutionCapable: true
+        NSPrefersDisplaySafeAreaCompatibilityMode: false
+        NSAppleEventsUsageDescription: Noturcode uses iTerm2's public scripting interface to show connected pane text, navigate when you click, and send only prompts you explicitly submit.
+        NSHumanReadableCopyright: Copyright 2026 Noturcode
+    entitlements:
+      path: Resources/Noturcode.entitlements
+      properties:
+        com.apple.security.automation.apple-events: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.app
+        PRODUCT_NAME: Noturcode
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        ENABLE_HARDENED_RUNTIME: true
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  NoturcodeCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/NoturcodeCoreTests
+    dependencies:
+      - target: NoturcodeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.core-tests
+        GENERATE_INFOPLIST_FILE: true
+  NoturcodeIntegrationTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/NoturcodeIntegrationTests
+    dependencies:
+      - target: NoturcodeCore
+      - target: NoturcodeBridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.integration-tests
+        GENERATE_INFOPLIST_FILE: true
+  NoturcodeUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - Tests/NoturcodeUITests
+    dependencies:
+      - target: Noturcode
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ro.noturcode.ui-tests
+        GENERATE_INFOPLIST_FILE: true
+schemes:
+  Noturcode:
+    build:
+      targets:
+        Noturcode: all
+        NoturcodeBridge: all
+        NoturcodeCoreTests: [test]
+        NoturcodeIntegrationTests: [test]
+        NoturcodeUITests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - NoturcodeCoreTests
+        - NoturcodeIntegrationTests
+        - NoturcodeUITests

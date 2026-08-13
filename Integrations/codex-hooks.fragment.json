@@ -1,0 +1,29 @@
+{
+  "description": "Noturcode mirrors explicitly connected Codex sessions into the macOS notch.",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "SubagentStart": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "SubagentStop": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ],
+    "Stop": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2 }] }
+    ]
+  }
+}

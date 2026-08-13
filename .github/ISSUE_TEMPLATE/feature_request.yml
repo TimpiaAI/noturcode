@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose an improvement to a Noturcode workflow
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Describe the workflow problem first. Concrete examples help us evaluate a solution without prematurely locking in its UI.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and discussions for this request.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What becomes difficult, slow, unsafe, or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Desired workflow
+      description: Describe what you would do and what feedback Noturcode should provide.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Product area
+      options:
+        - Notch and notifications
+        - Sessions and chat
+        - Agents and orchestration
+        - Terminal or editor navigation
+        - Hooks and integrations
+        - SSH and remote sessions
+        - Files and previews
+        - Packaging and setup
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Relevant agent, terminal, or editor
+      placeholder: Claude Code in Ghostty with tmux
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Attach redacted mockups or examples if they clarify the request.

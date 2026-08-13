@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "SessionEnd": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "BeforeAgent": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "AfterAgent": [
+      { "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "BeforeTool": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "AfterTool": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ],
+    "Notification": [
+      { "matcher": "*", "hooks": [{ "type": "command", "command": "__BRIDGE__", "timeout": 2000 }] }
+    ]
+  }
+}

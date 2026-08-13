@@ -1,0 +1,26 @@
+.DS_Store
+.build/
+build/
+build-distribution/
+dist/
+DerivedData/
+Noturcode.xcodeproj/
+*.xcresult
+*.profraw
+context/
+debug/
+tmp/
+nanobanana-output/
+research/
+qa/
+Design/
+Resources/NoturcodeIcon-*.png
+Resources/NoturcodeLogo-*.png
+*.log
+
+# Private product notes are retained locally, not published.
+BRIEF.md
+DESIGN.md
+NOTURCODE.md
+PRODUCT.md
+REQUIREMENTS.md

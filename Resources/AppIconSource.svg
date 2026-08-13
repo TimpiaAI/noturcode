@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title description">
+  <title id="title">Noturcode</title>
+  <desc id="description">A minimal folded N ribbon on a quiet graphite tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16191F"/>
+      <stop offset="1" stop-color="#080A0E"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="0.18" y1="0.18" x2="0.82" y2="0.82">
+      <stop offset="0" stop-color="#71F5EB"/>
+      <stop offset="0.52" stop-color="#339DFF"/>
+      <stop offset="1" stop-color="#8C61F5"/>
+    </linearGradient>
+  </defs>
+  <rect x="92" y="92" width="840" height="840" rx="210" fill="url(#tile)"/>
+  <rect x="93" y="93" width="838" height="838" rx="209" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+  <path d="M270 728 L270 286 L754 718 L754 276"
+        fill="none" stroke="url(#mark)" stroke-width="106" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
