@@ -13,7 +13,11 @@ struct NotchMetrics: Equatable, Sendable {
     let neckWidth: CGFloat
     let neckHeight: CGFloat
 
-    var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }
+    // The dock is physically attached to the display edge on every screen.
+    // An external-display inset creates a visible seam above the shelf.
+    var surfaceTopInset: CGFloat { 0 }
+
+    var dockHeight: CGFloat { (hasHardwareNotch ? neckHeight : 0) + 42 }
 
     init(screen: NSScreen) {
         let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
@@ -42,6 +46,12 @@ struct NotchMetrics: Equatable, Sendable {
             return min(envelopeWidth - 12, neckWidth + extensions)
         }
         return min(envelopeWidth - 12, max(neckWidth, CGFloat(sessionCount) * 20 + 36))
+    }
+
+    func dockWidth(sessionCount: Int) -> CGFloat {
+        let visibleCount = CGFloat(min(12, max(1, sessionCount)))
+        let contentWidth = 58 + visibleCount * 35 + (sessionCount > 12 ? 30 : 0)
+        return hasHardwareNotch ? max(neckWidth + 150, contentWidth) : contentWidth
     }
 
     func expandedHeight(sessionCount: Int) -> CGFloat {
@@ -269,43 +279,13 @@ final class NotchPresentationState: ObservableObject {
             || CommandLine.arguments.contains("--ui-test-live-transcript")
         isUITestRapidHover = CommandLine.arguments.contains("--ui-test-rapid-hover")
         isUITestActivityExpanded = CommandLine.arguments.contains("--ui-test-expanded-activity")
-        isExpanded = isUITestForcedExpanded
-        isArmed = !isExpanded
+        isExpanded = false
+        isArmed = false
     }
 
     func pointerMoved(inside: Bool) {
-        guard !isUITestForcedExpanded else { return }
         pointerInside = inside
-        if inside {
-            exitTask?.cancel()
-            exitTask = nil
-            guard !isExpanded, isArmed, dwellTask == nil else { return }
-            dwellTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .milliseconds(70))
-                } catch {
-                    return
-                }
-                guard let self, self.pointerInside, self.isArmed else { return }
-                self.isExpanded = true
-                self.dwellTask = nil
-            }
-        } else {
-            dwellTask?.cancel()
-            dwellTask = nil
-            if isExpanded, exitTask == nil {
-                exitTask = Task { [weak self] in
-                    do {
-                        try await Task.sleep(for: .milliseconds(140))
-                    } catch {
-                        return
-                    }
-                    self?.collapseAndLatch()
-                }
-            } else if !isExpanded, !isArmed {
-                isArmed = true
-            }
-        }
+        if !inside { setHoveredSession(nil) }
     }
 
     func setHoveredSession(_ id: String?) {
@@ -364,11 +344,10 @@ final class NotchPresentationState: ObservableObject {
         exitTask?.cancel()
         Task { [weak self] in
             do {
-                try await Task.sleep(for: .milliseconds(230))
+                try await Task.sleep(for: .milliseconds(80))
             } catch {
                 return
             }
-            self?.collapseAndLatch()
             self?.pressedSessionID = nil
             // UI fixtures must never activate or manipulate a real iTerm2 window.
             if self?.isUITestForcedExpanded != true {
@@ -378,7 +357,7 @@ final class NotchPresentationState: ObservableObject {
     }
 
     func dismiss() {
-        collapseAndLatch()
+        setHoveredSession(nil)
     }
 
     private func collapseAndLatch() {
@@ -451,19 +430,12 @@ final class NotchPanelController {
         guard sessionCount > 0 || hasAnnouncement else { return false }
         let width: CGFloat
         let height: CGFloat
-        if state.isExpanded {
-            width = min(420, metrics.envelopeWidth - 16)
-            height = min(
-                520,
-                metrics.expandedHeight(sessionCount: sessionCount)
-                    + state.activityHeightAdjustment(in: model.store.sessions)
-            )
-        } else if hasAnnouncement {
+        if hasAnnouncement {
             width = min(286, metrics.envelopeWidth - 16)
             height = metrics.neckHeight + 20
         } else {
-            width = metrics.collapsedWidth(sessionCount: sessionCount)
-            height = max(32, metrics.neckHeight)
+            width = min(metrics.envelopeWidth - 12, max(390, metrics.dockWidth(sessionCount: sessionCount)))
+            height = metrics.dockHeight
         }
         let frame = CGRect(
             x: metrics.screenFrame.midX - width / 2,
