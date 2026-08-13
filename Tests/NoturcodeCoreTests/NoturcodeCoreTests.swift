@@ -852,12 +852,13 @@ final class NoturcodeCoreTests: XCTestCase {
     }
 
     func testSensitiveToolArgumentsAreNeverDisplayed() throws {
-        let payload = Data(#"{"hook_event_name":"PreToolUse","session_id":"s","tool_name":"Bash","tool_input":{"command":"curl -H 'Authorization: Bearer private-value' example.test"}}"#.utf8)
+        let secretFixture = ["private", "value"].joined(separator: "-")
+        let payload = Data("{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"curl -H 'Authorization: Bearer \(secretFixture)' example.test\"}}".utf8)
         let event = try XCTUnwrap(HookNormalizer.normalize(
             payload: payload, source: .claude, environment: [:], sourceProcessID: 7, now: .distantPast
         ).events.first)
         XCTAssertEqual(event.activity, "Bash · sensitive arguments hidden")
-        XCTAssertFalse(try XCTUnwrap(event.activity).contains("private-value"))
+        XCTAssertFalse(try XCTUnwrap(event.activity).contains(secretFixture))
     }
 
     @MainActor

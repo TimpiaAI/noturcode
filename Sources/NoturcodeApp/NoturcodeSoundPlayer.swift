@@ -37,8 +37,9 @@ final class NoturcodeSoundPlayer: NSObject, NSSoundDelegate {
     }
 
     nonisolated func sound(_ sound: NSSound, didFinishPlaying finishedPlaying: Bool) {
+        let identifier = ObjectIdentifier(sound)
         Task { @MainActor [weak self] in
-            self?.activeSounds[ObjectIdentifier(sound)] = nil
+            self?.activeSounds[identifier] = nil
         }
     }
 }
