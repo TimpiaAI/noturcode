@@ -14,10 +14,21 @@ struct NotchMetrics: Equatable, Sendable {
     let neckHeight: CGFloat
 
     var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }
-    var dockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }
+    var minimumDockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }
     var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }
     var dockContentTopInset: CGFloat { hasHardwareNotch ? neckHeight + notchShoulderClearance : 0 }
-    var collapsedHeight: CGFloat { dockContentTopInset + dockRailHeight }
+
+    func dockRailHeight(sessionCount: Int) -> CGFloat {
+        return minimumDockRailHeight
+    }
+
+    func compactItemCount(sessionCount: Int) -> Int {
+        min(3, sessionCount) + (sessionCount > 3 ? 1 : 0)
+    }
+
+    func collapsedHeight(sessionCount: Int) -> CGFloat {
+        dockContentTopInset + dockRailHeight(sessionCount: sessionCount)
+    }
 
     init(screen: NSScreen) {
         let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
@@ -45,8 +56,9 @@ struct NotchMetrics: Equatable, Sendable {
 
     func collapsedWidth(sessionNames: [String]) -> CGFloat {
         guard !sessionNames.isEmpty else { return 0 }
-        let chipWidths = sessionNames.map(sessionChipWidth(for:)).reduce(0, +)
-        let chipSpacing = CGFloat(max(0, sessionNames.count - 1)) * 6
+        let widestChip = sessionNames.map(sessionChipWidth(for:)).max() ?? 0
+        let chipWidths = CGFloat(compactItemCount(sessionCount: sessionNames.count)) * widestChip
+        let chipSpacing = CGFloat(max(0, compactItemCount(sessionCount: sessionNames.count) - 1)) * 6
         let fixedContent: CGFloat = 28 + 19 + 16 + 1
         let contentWidth = fixedContent + chipWidths + chipSpacing
         let minimumWidth = hasHardwareNotch ? neckWidth + 28 : 120
@@ -381,6 +393,15 @@ final class NotchPresentationState: ObservableObject {
         activityExpandedSessionID = activityExpandedSessionID == sessionID ? nil : sessionID
     }
 
+    func expand() {
+        dwellTask?.cancel()
+        dwellTask = nil
+        exitTask?.cancel()
+        exitTask = nil
+        isExpanded = true
+        isArmed = false
+    }
+
     func activityHeightAdjustment(in sessions: [TrackedSession]) -> CGFloat {
         guard !sessions.isEmpty else { return 0 }
         let summaryCount = sessions.filter {
@@ -496,7 +517,7 @@ final class NotchPanelController {
             height = metrics.neckHeight + 20
         } else {
             width = metrics.collapsedWidth(sessionNames: model.store.sessions.map(\.name))
-            height = metrics.collapsedHeight
+            height = metrics.collapsedHeight(sessionCount: sessionCount)
         }
         let frame = CGRect(
             x: metrics.screenFrame.midX - width / 2,

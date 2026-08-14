@@ -29,7 +29,7 @@ struct NotchSurfaceView: View {
                     + state.activityHeightAdjustment(in: store.sessions)
             )
         }
-        return metrics.collapsedHeight
+        return metrics.collapsedHeight(sessionCount: store.sessions.count)
     }
 
     private var coordinatedContentTransition: AnyTransition {
@@ -60,7 +60,8 @@ struct NotchSurfaceView: View {
                     RestIndicatorView(
                         sessions: store.sortedSessions,
                         metrics: metrics,
-                        completionReads: model.completionReads
+                        completionReads: model.completionReads,
+                        onShowAll: { state.expand() }
                     )
                         .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
                         .transition(coordinatedContentTransition)
@@ -197,6 +198,7 @@ private struct RestIndicatorView: View {
     let sessions: [TrackedSession]
     let metrics: NotchMetrics
     @ObservedObject var completionReads: CompletionReadStore
+    let onShowAll: () -> Void
 
     private var animatedSessionID: String? {
         sessions.first(where: { $0.state.needsAttention })?.id ?? sessions.first?.id
@@ -225,7 +227,7 @@ private struct RestIndicatorView: View {
             sessionStrip(sessions)
         }
         .padding(.horizontal, 14)
-        .frame(height: metrics.dockRailHeight)
+        .frame(height: metrics.dockRailHeight(sessionCount: sessions.count))
         .padding(.top, metrics.dockContentTopInset)
         .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
@@ -236,11 +238,17 @@ private struct RestIndicatorView: View {
     @ViewBuilder
     private func sessionStrip(_ values: [TrackedSession]) -> some View {
         if !values.isEmpty {
+            let visibleSessions = Array(values.prefix(3))
+            let overflowCount = max(0, values.count - 3)
+            let chipWidth = values.map { metrics.sessionChipWidth(for: $0.name) }.max() ?? 50
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 6) {
-                    ForEach(values) { session in
-                        sessionChip(session)
+                    ForEach(visibleSessions) { session in
+                        sessionChip(session, width: chipWidth)
                             .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    }
+                    if overflowCount > 0 {
+                        overflowChip(count: overflowCount, width: chipWidth)
                     }
                 }
             }
@@ -248,7 +256,7 @@ private struct RestIndicatorView: View {
         }
     }
 
-    private func sessionChip(_ session: TrackedSession) -> some View {
+    private func sessionChip(_ session: TrackedSession, width: CGFloat) -> some View {
         let isPrimary = session.id == primarySession?.id
         return HStack(spacing: 5) {
             SessionMarble(
@@ -264,8 +272,7 @@ private struct RestIndicatorView: View {
                 .truncationMode(.tail)
         }
         .padding(.horizontal, 7)
-        .padding(.vertical, 6)
-        .frame(width: metrics.sessionChipWidth(for: session.name), alignment: .leading)
+        .frame(width: width, height: 30, alignment: .leading)
         .background(
             Capsule(style: .continuous)
                 .fill(.white.opacity(isPrimary ? 0.075 : 0.035))
@@ -275,6 +282,30 @@ private struct RestIndicatorView: View {
                 )
         )
         .accessibilityElement(children: .combine)
+    }
+
+    private func overflowChip(count: Int, width: CGFloat) -> some View {
+        Button(action: onShowAll) {
+            HStack(spacing: 5) {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 9, weight: .bold))
+                Text("+\(count)")
+                    .font(.system(size: 10.5, weight: .semibold))
+            }
+            .foregroundStyle(.white.opacity(0.66))
+            .padding(.horizontal, 7)
+            .frame(width: width, height: 30, alignment: .leading)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(.white.opacity(0.035))
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .stroke(.white.opacity(0.055), lineWidth: 0.6)
+                    }
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show \(count) more connected sessions")
     }
 }
 
