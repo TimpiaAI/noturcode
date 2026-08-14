@@ -14,6 +14,9 @@ struct NotchMetrics: Equatable, Sendable {
     let neckHeight: CGFloat
 
     var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }
+    var dockRailHeight: CGFloat { 42 }
+    var dockContentTopInset: CGFloat { hasHardwareNotch ? neckHeight : 0 }
+    var collapsedHeight: CGFloat { dockContentTopInset + dockRailHeight }
 
     init(screen: NSScreen) {
         let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
@@ -35,13 +38,18 @@ struct NotchMetrics: Equatable, Sendable {
         }
     }
 
-    func collapsedWidth(sessionCount: Int) -> CGFloat {
-        guard sessionCount > 0 else { return 0 }
-        if hasHardwareNotch {
-            let extensions = CGFloat(sessionCount) * 88 + 176
-            return min(envelopeWidth - 12, max(neckWidth + 240, extensions))
-        }
-        return min(envelopeWidth - 12, max(340, CGFloat(sessionCount) * 88 + 176))
+    func sessionChipWidth(for name: String) -> CGFloat {
+        min(96, max(50, ceil(CGFloat(name.count) * 5.7) + 34))
+    }
+
+    func collapsedWidth(sessionNames: [String]) -> CGFloat {
+        guard !sessionNames.isEmpty else { return 0 }
+        let chipWidths = sessionNames.map(sessionChipWidth(for:)).reduce(0, +)
+        let chipSpacing = CGFloat(max(0, sessionNames.count - 1)) * 6
+        let fixedContent: CGFloat = 28 + 19 + 16 + 1
+        let contentWidth = fixedContent + chipWidths + chipSpacing
+        let minimumWidth = hasHardwareNotch ? neckWidth + 28 : 120
+        return min(envelopeWidth - 12, max(minimumWidth, contentWidth))
     }
 
     func expandedHeight(sessionCount: Int) -> CGFloat {
@@ -486,8 +494,8 @@ final class NotchPanelController {
             width = min(286, metrics.envelopeWidth - 16)
             height = metrics.neckHeight + 20
         } else {
-            width = metrics.collapsedWidth(sessionCount: sessionCount)
-            height = max(32, metrics.neckHeight)
+            width = metrics.collapsedWidth(sessionNames: model.store.sessions.map(\.name))
+            height = metrics.collapsedHeight
         }
         let frame = CGRect(
             x: metrics.screenFrame.midX - width / 2,

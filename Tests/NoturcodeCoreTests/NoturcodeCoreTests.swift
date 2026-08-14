@@ -787,18 +787,23 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("disconnect-noturcode-"))
     }
 
-    func testCollapsedSessionsSplitOnlyAroundARealHardwareNotch() throws {
+    func testHardwareNotchReservesItsFullHeightAboveOneSessionRail() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let notch = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
-        XCTAssertTrue(notch.contains("if metrics.hasHardwareNotch"))
+        XCTAssertTrue(notch.contains("return metrics.collapsedHeight"))
+        XCTAssertTrue(notch.contains(".padding(.top, metrics.dockContentTopInset)"))
         XCTAssertTrue(notch.contains("sessionStrip(sessions)"))
-        XCTAssertTrue(notch.contains("sessionStrip(working)"))
-        XCTAssertTrue(notch.contains("sessionStrip(attention)"))
-        XCTAssertFalse(notch.contains("Spacer(minLength: 4)"))
+        XCTAssertFalse(notch.contains("sessionStrip(working)"))
+        XCTAssertFalse(notch.contains("sessionStrip(attention)"))
+        XCTAssertFalse(notch.contains("Color.clear.frame(width: metrics.neckWidth"))
+        XCTAssertTrue(coordinator.contains("var dockRailHeight: CGFloat { 42 }"))
+        XCTAssertTrue(coordinator.contains("var collapsedHeight: CGFloat"))
+        XCTAssertTrue(coordinator.contains("height = metrics.collapsedHeight"))
     }
 
     func testWorkflowAgentSelectionLoadsItsOwnConversation() throws {
@@ -1132,11 +1137,16 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("ForEach(values)"))
         XCTAssertTrue(surface.contains("Text(session.name)"))
         XCTAssertTrue(surface.contains(".lineLimit(1)"))
-        XCTAssertTrue(surface.contains(".frame(maxHeight: .infinity, alignment: .center)"))
+        XCTAssertTrue(surface.contains(".frame(height: metrics.dockRailHeight)"))
+        XCTAssertTrue(surface.contains(".frame(maxHeight: .infinity, alignment: .top)"))
         XCTAssertFalse(surface.contains("compactActivityText"))
         XCTAssertFalse(surface.contains("session.currentActivity"))
-        XCTAssertTrue(coordinator.contains("CGFloat(sessionCount) * 88"))
-        XCTAssertTrue(coordinator.contains("max(340"))
+        XCTAssertTrue(surface.contains("metrics.collapsedWidth(sessionNames: store.sessions.map(\\.name))"))
+        XCTAssertTrue(surface.contains("metrics.sessionChipWidth(for: session.name)"))
+        XCTAssertTrue(coordinator.contains("func collapsedWidth(sessionNames: [String])"))
+        XCTAssertTrue(coordinator.contains("sessionNames.map(sessionChipWidth(for:)).reduce(0, +)"))
+        XCTAssertFalse(coordinator.contains("CGFloat(sessionCount) * 88"))
+        XCTAssertFalse(coordinator.contains("max(340"))
     }
 
     func testDoneSummaryGetsTwoLinesAndResponseScopedHoverPopover() throws {

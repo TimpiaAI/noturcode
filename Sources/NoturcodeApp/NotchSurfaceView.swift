@@ -18,7 +18,7 @@ struct NotchSurfaceView: View {
 
     private var surfaceWidth: CGFloat {
         if state.isExpanded { return min(420, metrics.envelopeWidth - 16) }
-        return metrics.collapsedWidth(sessionCount: store.sessions.count)
+        return metrics.collapsedWidth(sessionNames: store.sessions.map(\.name))
     }
 
     private var surfaceHeight: CGFloat {
@@ -29,7 +29,7 @@ struct NotchSurfaceView: View {
                     + state.activityHeightAdjustment(in: store.sessions)
             )
         }
-        return max(40, metrics.neckHeight)
+        return metrics.collapsedHeight
     }
 
     private var coordinatedContentTransition: AnyTransition {
@@ -149,7 +149,7 @@ struct NotchSilhouette: Shape {
         let midX = rect.midX
         let neckLeft = midX - neckWidth / 2
         let neckRight = midX + neckWidth / 2
-        let shoulderY = min(rect.height - bottomRadius - 1, neckHeight + 13)
+        let shoulderY = min(rect.height - bottomRadius - 1, neckHeight + 8)
         let bottomY = rect.maxY
         let radius = min(bottomRadius, rect.width / 4, max(2, rect.height / 3))
 
@@ -188,16 +188,8 @@ private struct RestIndicatorView: View {
     let metrics: NotchMetrics
     @ObservedObject var completionReads: CompletionReadStore
 
-    private var working: [TrackedSession] {
-        sessions.filter { !$0.state.needsAttention }
-    }
-
-    private var attention: [TrackedSession] {
-        sessions.filter(\.state.needsAttention)
-    }
-
     private var animatedSessionID: String? {
-        attention.first?.id ?? working.first?.id
+        sessions.first(where: { $0.state.needsAttention })?.id ?? sessions.first?.id
     }
 
     private var sessionIDs: [String] {
@@ -206,7 +198,7 @@ private struct RestIndicatorView: View {
 
     private var primarySession: TrackedSession? {
         sessions.first(where: { $0.state == .working })
-            ?? attention.first
+            ?? sessions.first(where: { $0.state.needsAttention })
             ?? sessions.first
     }
 
@@ -215,26 +207,17 @@ private struct RestIndicatorView: View {
     }
 
     var body: some View {
-        Group {
-            if metrics.hasHardwareNotch {
-                HStack(spacing: 8) {
-                    NoturcodeBrandMark(size: 19)
-                    sessionStrip(working)
-                    Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
-                    sessionStrip(attention)
-                }
-            } else {
-                HStack(spacing: 8) {
-                    NoturcodeBrandMark(size: 19)
-                    Rectangle()
-                        .fill(.white.opacity(0.12))
-                        .frame(width: 1, height: 20)
-                    sessionStrip(sessions)
-                }
-            }
+        HStack(spacing: 8) {
+            NoturcodeBrandMark(size: 19)
+            Rectangle()
+                .fill(.white.opacity(0.12))
+                .frame(width: 1, height: 20)
+            sessionStrip(sessions)
         }
-        .padding(.horizontal, metrics.hasHardwareNotch ? 9 : 14)
-        .frame(maxHeight: .infinity, alignment: .center)
+        .padding(.horizontal, 14)
+        .frame(height: metrics.dockRailHeight)
+        .padding(.top, metrics.dockContentTopInset)
+        .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
@@ -271,7 +254,7 @@ private struct RestIndicatorView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(maxWidth: 96, alignment: .leading)
+        .frame(width: metrics.sessionChipWidth(for: session.name), alignment: .leading)
         .padding(.horizontal, 7)
         .padding(.vertical, 6)
         .background(
