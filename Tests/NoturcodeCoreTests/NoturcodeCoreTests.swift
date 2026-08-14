@@ -627,8 +627,41 @@ final class NoturcodeCoreTests: XCTestCase {
         let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
         let notch = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
 
-        XCTAssertTrue(coordinator.contains("CGSize(width: 392, height: 96)"))
-        XCTAssertTrue(notch.contains(".padding(.vertical, 12)"))
+        XCTAssertTrue(coordinator.contains("CGSize(width: 408, height: 106)"))
+        XCTAssertTrue(notch.contains(".padding(.vertical, 15)"))
+    }
+
+    func testAttentionBannerUsesAControlledTwoStagePopAndAudibleFinishCue() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let sounds = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NoturcodeSoundPlayer.swift"))
+
+        XCTAssertTrue(coordinator.contains("let overshootFrame"))
+        XCTAssertTrue(coordinator.contains("self.presentedID == announcement.id"))
+        XCTAssertTrue(coordinator.contains("context.duration = 0.16"))
+        XCTAssertTrue(coordinator.contains("settleContext.duration = 0.10"))
+        XCTAssertTrue(sounds.contains("sound.volume = 0.82"))
+    }
+
+    func testDesktopSidebarWrapsBehindTheRoundedApplicationShell() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let status = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/StatusWindowController.swift"))
+
+        XCTAssertTrue(status.contains("private var applicationShell"))
+        XCTAssertTrue(status.contains("HStack(spacing: -14)"))
+        XCTAssertTrue(status.contains("RoundedRectangle(cornerRadius: 16, style: .continuous)"))
+        XCTAssertTrue(status.contains("Color(red: 0.020, green: 0.022, blue: 0.028)"))
+        XCTAssertTrue(status.contains(".stroke(.white.opacity(0.13), lineWidth: 0.8)"))
+        XCTAssertTrue(status.contains(".frame(width: 272)"))
+        XCTAssertTrue(status.contains(".frame(width: 286, alignment: .leading)"))
+        XCTAssertTrue(status.contains(".zIndex(1)"))
+        XCTAssertFalse(status.contains("Rectangle().fill(.white.opacity(0.075)).frame(width: 1)"))
     }
 
     func testAppDisconnectRemovesOnlyNoturcodeTracking() throws {

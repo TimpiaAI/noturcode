@@ -328,7 +328,7 @@ struct AnnouncementView: View {
                 .frame(width: 17, height: 17)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
+        .padding(.vertical, 15)
         .contentShape(Rectangle())
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)

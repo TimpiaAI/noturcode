@@ -108,15 +108,14 @@ private struct StatusOverviewView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: -14) {
             if isSidebarVisible {
                 sessionSidebar
                     .transition(.move(edge: .leading).combined(with: .opacity))
-                Rectangle().fill(.white.opacity(0.075)).frame(width: 1)
             }
-            workspace
+            applicationShell
         }
-        .background(Color(red: 0.047, green: 0.050, blue: 0.059))
+        .background(Color(red: 0.020, green: 0.022, blue: 0.028))
         .frame(minWidth: 980, minHeight: 640)
         .animation(.easeOut(duration: 0.16), value: isSidebarVisible)
         .onAppear { if selectedSessionID == nil { selectedSessionID = sessions.first?.id } }
@@ -125,6 +124,21 @@ private struct StatusOverviewView: View {
                 selectedSessionID = ids.first
             }
         }
+    }
+
+    private var applicationShell: some View {
+        workspace
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(red: 0.061, green: 0.064, blue: 0.074))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.13), lineWidth: 0.8)
+            }
+            .shadow(color: .black.opacity(0.44), radius: 18, x: -4, y: 0)
+            .padding(.vertical, 10)
+            .padding(.trailing, 10)
+            .zIndex(1)
     }
 
     private var sessionSidebar: some View {
@@ -191,8 +205,9 @@ private struct StatusOverviewView: View {
             .padding(.horizontal, 14)
             .frame(height: 42)
         }
-        .frame(width: 286)
-        .background(Color(red: 0.037, green: 0.040, blue: 0.047))
+        .frame(width: 272)
+        .frame(width: 286, alignment: .leading)
+        .background(Color(red: 0.020, green: 0.022, blue: 0.028))
         .accessibilityIdentifier("desktop-session-sidebar")
     }
 

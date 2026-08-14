@@ -26,7 +26,7 @@ final class NoturcodeSoundPlayer: NSObject, NSSoundDelegate {
         sound.delegate = self
         switch cue {
         case .done, .asking, .failed:
-            sound.volume = 0.68
+            sound.volume = 0.82
         case .connect, .open, .close:
             sound.volume = 0.42
         case .send:

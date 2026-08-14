@@ -165,7 +165,7 @@ private final class AttentionAnnouncementPanelController {
     private let hostingView: AnnouncementHostingView
     private let onSelect: (SessionKey) -> Void
     private var presentedID: UUID?
-    private let size = CGSize(width: 392, height: 96)
+    private let size = CGSize(width: 408, height: 106)
 
     init(onSelect: @escaping (SessionKey) -> Void) {
         self.onSelect = onSelect
@@ -193,8 +193,11 @@ private final class AttentionAnnouncementPanelController {
                 context.duration = 0.14
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                 panel.animator().alphaValue = 0
-            } completionHandler: { [weak panel] in
-                Task { @MainActor in panel?.orderOut(nil) }
+            } completionHandler: { [weak self] in
+                Task { @MainActor in
+                    guard let self, self.presentedID == nil else { return }
+                    self.panel.orderOut(nil)
+                }
             }
             return
         }
@@ -219,19 +222,40 @@ private final class AttentionAnnouncementPanelController {
             visibleFrame: visibleFrame,
             size: size
         )
-        let x = origin.x
-        let finalY = origin.y
+        let finalFrame = CGRect(origin: origin, size: size)
         let isTopHalf = edge == .top
-        let entranceY = finalY + (isTopHalf ? 10 : -10)
+        let entranceOffset: CGFloat = isTopHalf ? 14 : -14
+        let entranceFrame = finalFrame
+            .insetBy(dx: 6, dy: 3)
+            .offsetBy(dx: 0, dy: entranceOffset)
+        let overshootFrame = finalFrame.insetBy(dx: -2, dy: -1)
 
-        panel.setFrame(CGRect(origin: CGPoint(x: x, y: entranceY), size: size), display: false)
+        panel.setFrame(entranceFrame, display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            panel.setFrame(finalFrame, display: true)
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.12
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1
+            }
+            return
+        }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.22
+            context.duration = 0.16
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().setFrameOrigin(CGPoint(x: x, y: finalY))
+            panel.animator().setFrame(overshootFrame, display: true)
             panel.animator().alphaValue = 1
+        } completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self, self.presentedID == announcement.id else { return }
+                NSAnimationContext.runAnimationGroup { settleContext in
+                    settleContext.duration = 0.10
+                    settleContext.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    self.panel.animator().setFrame(finalFrame, display: true)
+                }
+            }
         }
     }
 
