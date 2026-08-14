@@ -307,6 +307,26 @@ final class NoturcodeCoreTests: XCTestCase {
         )
     }
 
+    func testRemoteSessionStartUsesTheNameChosenByNC() throws {
+        let result = HookNormalizer.normalize(
+            payload: .object([
+                "hook_event_name": .string("SessionStart"),
+                "session_id": .string("remote-named-session")
+            ]),
+            source: .codex,
+            environment: [
+                "PWD": "/root",
+                "NOTURCODE_SESSION_NAME": "GPRC deploy"
+            ],
+            sourceProcessID: 44,
+            terminalSessionIDOverride: "w0t1:REMOTE",
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        XCTAssertEqual(result.events.first?.kind, .sessionStarted)
+        XCTAssertEqual(result.events.first?.name, "GPRC deploy")
+    }
+
     func testInteractiveNCIntegrationPreservesNetcatAndGuidesPairing() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -320,10 +340,16 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(shell.contains("command /usr/bin/nc"))
         XCTAssertTrue(cli.contains("Pair a VPS"))
         XCTAssertTrue(cli.contains("Open an SSH workspace"))
+        XCTAssertTrue(cli.contains("Resume an existing Codex chat"))
+        XCTAssertTrue(cli.contains("Chat name"))
+        XCTAssertTrue(cli.contains("codex resume --all"))
+        XCTAssertTrue(cli.contains("settle()"))
+        XCTAssertTrue(cli.contains("[===>]"))
         XCTAssertTrue(cli.contains("StreamLocalBindUnlink=yes"))
         XCTAssertTrue(cli.contains("pair-code"))
         XCTAssertTrue(agent.contains("remotePair"))
         XCTAssertTrue(agent.contains("remoteHook"))
+        XCTAssertTrue(agent.contains("NOTURCODE_SESSION_NAME"))
         XCTAssertTrue(agent.contains("Hooks must fail open"))
     }
 
@@ -1489,6 +1515,29 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(session.sourceProcessID, 442)
         XCTAssertEqual(session.transcriptPath, "/tmp/auto-session.jsonl")
         XCTAssertEqual(session.state, .idle)
+    }
+
+    @MainActor
+    func testNamedRemoteSessionReplacesTheRootDirectoryFallback() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+        _ = store.apply(BridgeEvent(
+            kind: .sessionStarted,
+            source: .codex,
+            sessionID: "remote-existing",
+            terminalSessionID: "w0t2:REMOTE",
+            cwd: "/root"
+        ))
+        let renamed = store.apply(BridgeEvent(
+            kind: .sessionStarted,
+            source: .codex,
+            sessionID: "remote-existing",
+            name: "GPRC deploy",
+            terminalSessionID: "w0t2:REMOTE",
+            cwd: "/root"
+        ))
+
+        XCTAssertEqual(renamed?.new?.name, "GPRC deploy")
     }
 
     @MainActor

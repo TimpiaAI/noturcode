@@ -17,6 +17,20 @@ step() {
   print -- "[$1] $2"
 }
 
+settle() {
+  local label="$1"
+  if [[ -t 1 ]]; then
+    local frame
+    for frame in '[>   ]' '[=>  ]' '[==> ]' '[===>]'; do
+      printf '\r  %s %s' "$frame" "$label"
+      sleep 0.025
+    done
+    printf '\r  [ ok ] %s\n' "$label"
+  else
+    print -- "  [ ok ] $label"
+  fi
+}
+
 valid_host() {
   [[ -n "$1" && "$1" != -* && "$1" != *[$'\n\r\t ']* ]]
 }
@@ -78,6 +92,23 @@ read_host() {
   print -r -- "$value"
 }
 
+read_chat_name() {
+  local default_name="$1"
+  local value=""
+  read "value?Chat name [$default_name]: "
+  value="${value:-$default_name}"
+  if [[ -z "$value" || ${#value} -gt 80 || "$value" == *[$'\n\r\t']* || "$value" == *"'"* ]]; then
+    fail "Use 1-80 characters. Do not use quotes or line breaks."
+    return 1
+  fi
+  print -r -- "$value"
+}
+
+sync_remote_agent() {
+  local host="$1"
+  ssh "$host" 'umask 077; mkdir -p "$HOME/.local/bin"; cat > "$HOME/.local/bin/noturcode-agent"; chmod 700 "$HOME/.local/bin/noturcode-agent"' < "$remote_agent"
+}
+
 pair_host() {
   local host="${1:-}"
   if [[ -z "$host" ]]; then
@@ -94,11 +125,12 @@ pair_host() {
   start_proxy "$local_socket" pair || return 1
 
   step 1 "Copy the free helper to $host"
-  if ! ssh "$host" 'umask 077; mkdir -p "$HOME/.local/bin"; cat > "$HOME/.local/bin/noturcode-agent"; chmod 700 "$HOME/.local/bin/noturcode-agent"' < "$remote_agent"; then
+  if ! sync_remote_agent "$host"; then
     stop_proxy
     fail "Could not copy the helper to $host."
     return 1
   fi
+  settle "Helper copied"
 
   step 2 "Pair with one-time code $code"
   if ! ssh -tt \
@@ -112,28 +144,51 @@ pair_host() {
     return 1
   fi
   stop_proxy
+  settle "VPS paired"
 
   step 3 "Ready. Run nc, then choose Open an SSH workspace."
 }
 
 connect_host() {
   local host="${1:-}"
+  local mode="${2:-shell}"
+  local chat_name="${3:-}"
   if [[ -z "$host" ]]; then
     host=$(read_host) || return 1
   fi
   valid_host "$host" || fail "Invalid SSH host or alias." || return 1
+  if [[ -z "$chat_name" ]]; then
+    chat_name=$(read_chat_name "$host") || return 1
+  fi
   ensure_app || return 1
+
+  step 1 "Sync the remote helper on $host"
+  if ! sync_remote_agent "$host"; then
+    fail "Could not update the helper on $host."
+    return 1
+  fi
+  settle "Helper ready"
 
   local local_socket terminal_id remote_socket remote_command
   local_socket=$("$bridge" socket-path) || return 1
   terminal_id=$("$bridge" terminal-id) || return 1
   remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-$$.sock"
-  remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; exec \"\${SHELL:-/bin/sh}\" -l"
+  if [[ "$mode" == "resume" ]]; then
+    remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; exec \"\${SHELL:-/bin/sh}\" -lc 'codex resume --all'"
+  else
+    remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; exec \"\${SHELL:-/bin/sh}\" -l"
+  fi
   start_proxy "$local_socket" session || return 1
 
-  step 1 "Open the encrypted tunnel"
-  step 2 "Start the interactive shell on $host"
-  step 3 "Run Claude, Codex, or Gemini. Use /nc NAME inside the agent."
+  step 2 "Open the encrypted tunnel"
+  settle "Tunnel ready"
+  if [[ "$mode" == "resume" ]]; then
+    step 3 "Open the Codex chat picker on $host"
+    step 4 "Select a chat. Noturcode will show it as $chat_name."
+  else
+    step 3 "Start the interactive shell on $host"
+    step 4 "Run your coding agent. Noturcode will show it as $chat_name."
+  fi
   ssh -tt \
     -o ExitOnForwardFailure=yes \
     -o StreamLocalBindUnlink=yes \
@@ -142,6 +197,15 @@ connect_host() {
   local status=$?
   stop_proxy
   return "$status"
+}
+
+resume_codex() {
+  local host="${1:-}"
+  local chat_name="${2:-}"
+  if [[ -z "$host" ]]; then
+    host=$(read_host) || return 1
+  fi
+  connect_host "$host" resume "$chat_name"
 }
 
 doctor() {
@@ -157,16 +221,18 @@ menu() {
     print -- "Noturcode remote"
     print -- "  1. Pair a VPS"
     print -- "  2. Open an SSH workspace"
-    print -- "  3. Check setup"
-    print -- "  4. Exit"
+    print -- "  3. Resume an existing Codex chat"
+    print -- "  4. Check setup"
+    print -- "  5. Exit"
     local choice=""
-    read "choice?Choose 1-4: "
+    read "choice?Choose 1-5: "
     case "$choice" in
       1) pair_host || true ;;
       2) connect_host; return $? ;;
-      3) doctor || true ;;
-      4) return 0 ;;
-      *) print -u2 -- "Choose 1, 2, 3, or 4." ;;
+      3) resume_codex; return $? ;;
+      4) doctor || true ;;
+      5) return 0 ;;
+      *) print -u2 -- "Choose 1, 2, 3, 4, or 5." ;;
     esac
   done
 }
@@ -174,12 +240,14 @@ menu() {
 case "${1:-}" in
   "") menu ;;
   pair) shift; pair_host "${1:-}" ;;
-  ssh) shift; connect_host "${1:-}" ;;
+  ssh) shift; connect_host "${1:-}" shell "${2:-}" ;;
+  resume) shift; resume_codex "${1:-}" "${2:-}" ;;
   doctor) doctor ;;
   help|-h|--help)
     print -- "nc                 Interactive setup"
     print -- "nc pair [host]     Pair one VPS"
     print -- "nc ssh [host]      Open one tracked SSH shell"
+    print -- "nc resume [host]   Resume an existing Codex chat"
     print -- "nc doctor          Check the local setup"
     ;;
   *) fail "Unknown command. Run nc for the guided setup." ;;

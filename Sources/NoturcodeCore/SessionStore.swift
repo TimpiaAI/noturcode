@@ -124,6 +124,7 @@ public final class SessionStore: ObservableObject {
             }
             session.sourceProcessID = event.sourceProcessID ?? session.sourceProcessID
             session.transcriptPath = event.transcriptPath ?? session.transcriptPath
+            session.name = Self.normalizedSessionName(event.name) ?? session.name
             if let terminal = event.terminalSessionID, !terminal.isEmpty {
                 session.terminal = TerminalTarget(sessionID: terminal)
             }

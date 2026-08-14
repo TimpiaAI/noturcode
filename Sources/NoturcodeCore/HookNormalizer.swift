@@ -109,6 +109,11 @@ public enum HookNormalizer {
         let tokens = payload.recursivelySummedTokens()
         let agentID = payload.firstString(for: ["agent_id", "agentId"])
         let agentType = payload.firstString(for: ["agent_type", "agentType"]) ?? "agent"
+        let sessionName = environment["NOTURCODE_SESSION_NAME"]?
+            .components(separatedBy: .newlines)
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
 
         func event(
             _ kind: BridgeEventKind,
@@ -123,6 +128,7 @@ public enum HookNormalizer {
                 source: source,
                 sessionID: sessionID,
                 timestamp: now,
+                name: sessionName,
                 terminalSessionID: terminalSessionID,
                 sourceProcessID: sourceProcessID,
                 cwd: cwd,
