@@ -5,6 +5,33 @@ import XCTest
 @testable import NoturcodeCore
 
 final class NoturcodeCoreTests: XCTestCase {
+    func testAutomaticLaunchPausePersistsUntilExplicitResume() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-launch-policy-\(UUID().uuidString)", isDirectory: true)
+        let marker = directory.appendingPathComponent("automatic-launch-paused")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertFalse(NoturcodeLaunchPolicy.isAutomaticLaunchPaused(at: marker))
+        try NoturcodeLaunchPolicy.pauseAutomaticLaunch(at: marker)
+        XCTAssertTrue(NoturcodeLaunchPolicy.isAutomaticLaunchPaused(at: marker))
+        try NoturcodeLaunchPolicy.resumeAutomaticLaunch(at: marker)
+        XCTAssertFalse(NoturcodeLaunchPolicy.isAutomaticLaunchPaused(at: marker))
+    }
+
+    func testQuitPausesHookRelaunchUntilDirectAppLaunch() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appEntry = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppEntry.swift"))
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+
+        XCTAssertTrue(appEntry.contains("NoturcodeLaunchPolicy.resumeAutomaticLaunch()"))
+        XCTAssertTrue(appEntry.contains("NoturcodeLaunchPolicy.pauseAutomaticLaunch()"))
+        XCTAssertTrue(bridge.contains("NoturcodeLaunchPolicy.isAutomaticLaunchPaused()"))
+        XCTAssertTrue(bridge.contains("automatic-launch: \\(automaticLaunchStatus)"))
+    }
+
     func testTranscriptRunStateDetectsClaudeEndTurnAfterLatestPrompt() throws {
         let prompt = ISO8601DateFormatter().date(from: "2026-08-14T08:00:00Z")!
         let active = """

@@ -32,6 +32,8 @@ struct NoturcodeApplication: App {
 
 @MainActor
 final class NoturcodeAppDelegate: NSObject, NSApplicationDelegate {
+    private var pausesAutomaticLaunchOnTermination = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.regular)
         if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
@@ -121,6 +123,10 @@ final class NoturcodeAppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        if !CommandLine.arguments.contains(where: { $0.hasPrefix("--ui-test") }) {
+            try? NoturcodeLaunchPolicy.resumeAutomaticLaunch()
+            pausesAutomaticLaunchOnTermination = true
+        }
         AppModel.shared.start()
 
         let isBackgroundLaunch = CommandLine.arguments.contains("--background")
@@ -139,6 +145,9 @@ final class NoturcodeAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if pausesAutomaticLaunchOnTermination {
+            try? NoturcodeLaunchPolicy.pauseAutomaticLaunch()
+        }
         AppModel.shared.stop()
     }
 }

@@ -3,6 +3,14 @@ import Foundation
 import NoturcodeCore
 
 struct NoturcodeBridgeMain {
+    private enum DeliveryError: LocalizedError {
+        case automaticLaunchPaused
+
+        var errorDescription: String? {
+            "Noturcode was quit and automatic launch is paused. Open Noturcode to resume."
+        }
+    }
+
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
         guard let command = arguments.first else {
@@ -26,6 +34,10 @@ struct NoturcodeBridgeMain {
     }
 
     private static func runHook(arguments: [String]) {
+        if NoturcodeLaunchPolicy.isAutomaticLaunchPaused() {
+            writeJSON([:])
+            return
+        }
         guard let sourceValue = option("--source", in: arguments),
               let source = AgentSource(rawValue: sourceValue) else {
             writeJSON(["decision": "block", "reason": "Noturcode hook is missing a valid source."])
@@ -144,6 +156,10 @@ struct NoturcodeBridgeMain {
     }
 
     private static func runEmit(arguments: [String]) {
+        if NoturcodeLaunchPolicy.isAutomaticLaunchPaused() {
+            writeStandardOutput("paused\n")
+            return
+        }
         guard let sourceValue = option("--source", in: arguments),
               let source = AgentSource(rawValue: sourceValue),
               let sessionID = option("--session", in: arguments),
@@ -187,8 +203,10 @@ struct NoturcodeBridgeMain {
             socketStatus = FileManager.default.fileExists(atPath: NoturcodeSocket.path) ? "stale" : "missing"
         }
         let appPath = findAppPath()
+        let automaticLaunchStatus = NoturcodeLaunchPolicy.isAutomaticLaunchPaused() ? "paused" : "enabled"
         writeStandardOutput("socket: \(socketStatus)\n")
         writeStandardOutput("app: \(appPath ?? "not found")\n")
+        writeStandardOutput("automatic-launch: \(automaticLaunchStatus)\n")
         let environment = ProcessInfo.processInfo.environment
         let terminal = environment["TERM_SESSION_ID"] == nil
             ? (environment["TERM_PROGRAM"] ?? environment["LC_TERMINAL"] ?? "generic")
@@ -231,6 +249,9 @@ struct NoturcodeBridgeMain {
         } catch {
             if case UnixSocketError.responseTimeout = error { throw error }
             guard launchIfNeeded, let path = findAppPath() else { throw error }
+            guard !NoturcodeLaunchPolicy.isAutomaticLaunchPaused() else {
+                throw DeliveryError.automaticLaunchPaused
+            }
             launchApp(at: path)
             var lastError: Error = error
             for _ in 0..<30 {
