@@ -5,6 +5,41 @@ import XCTest
 @testable import NoturcodeCore
 
 final class NoturcodeCoreTests: XCTestCase {
+    func testTranscriptRunStateDetectsClaudeEndTurnAfterLatestPrompt() throws {
+        let prompt = ISO8601DateFormatter().date(from: "2026-08-14T08:00:00Z")!
+        let active = """
+        {"type":"user","timestamp":"2026-08-14T08:00:00Z","message":{"content":"fix it"}}
+        {"type":"assistant","timestamp":"2026-08-14T08:00:05Z","message":{"stop_reason":"tool_use","content":[{"type":"tool_use","name":"Bash"}]}}
+        """
+        let finished = active + "\n" + """
+        {"type":"assistant","timestamp":"2026-08-14T08:00:10Z","message":{"stop_reason":"end_turn","content":[{"type":"text","text":"Done"}]}}
+        """
+
+        XCTAssertFalse(TranscriptRunStateDetector.turnCompleted(
+            data: Data(active.utf8),
+            source: .claude,
+            after: prompt
+        ))
+        XCTAssertTrue(TranscriptRunStateDetector.turnCompleted(
+            data: Data(finished.utf8),
+            source: .claude,
+            after: prompt
+        ))
+    }
+
+    func testAppReconcilesMissedTranscriptCompletionWithoutHover() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appModel = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+
+        XCTAssertTrue(appModel.contains("startTranscriptReconciliation()"))
+        XCTAssertTrue(appModel.contains("Task.detached(priority: .utility)"))
+        XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.turnCompleted"))
+        XCTAssertTrue(appModel.contains("kind: .responseCompleted"))
+    }
+
     func testSessionPersistenceUsesPrivateDirectoryAndFilePermissions() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-security-\(UUID().uuidString)", isDirectory: true)

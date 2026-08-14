@@ -28,6 +28,13 @@ final class CompletionReadStore: ObservableObject {
 
 @MainActor
 final class AppModel: ObservableObject {
+    private struct TranscriptCandidate: Sendable {
+        let key: SessionKey
+        let path: String
+        let source: AgentSource
+        let lastPromptAt: Date
+    }
+
     static let shared = AppModel()
 
     let store: SessionStore
@@ -51,6 +58,7 @@ final class AppModel: ObservableObject {
     private var displayCoordinator: DisplayCoordinator?
     private var askingEscalations: [SessionKey: Task<Void, Never>] = [:]
     private var staleMessageTask: Task<Void, Never>?
+    private var transcriptReconciliationTask: Task<Void, Never>?
     private var cancellables: Set<AnyCancellable> = []
 
     private init() {
@@ -129,12 +137,15 @@ final class AppModel: ObservableObject {
 
         displayCoordinator = DisplayCoordinator(model: self)
         displayCoordinator?.start()
+        startTranscriptReconciliation()
     }
 
     func stop() {
         askingEscalations.values.forEach { $0.cancel() }
         askingEscalations.removeAll()
         staleMessageTask?.cancel()
+        transcriptReconciliationTask?.cancel()
+        transcriptReconciliationTask = nil
         displayCoordinator?.stop()
         displayCoordinator = nil
         processMonitor?.stop()
@@ -246,6 +257,48 @@ final class AppModel: ObservableObject {
         }
         if transition != nil {
             displayCoordinator?.sessionStateDidChange()
+        }
+    }
+
+    private func startTranscriptReconciliation() {
+        transcriptReconciliationTask?.cancel()
+        transcriptReconciliationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(2))
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                let candidates = self.store.sessions.compactMap { session -> TranscriptCandidate? in
+                    guard session.state == .working,
+                          let path = session.transcriptPath else { return nil }
+                    return TranscriptCandidate(
+                        key: session.key,
+                        path: path,
+                        source: session.key.source,
+                        lastPromptAt: session.lastPromptAt
+                    )
+                }
+                let completedKeys = await Task.detached(priority: .utility) {
+                    candidates.compactMap { candidate in
+                        TranscriptRunStateDetector.turnCompleted(
+                            atPath: candidate.path,
+                            source: candidate.source,
+                            after: candidate.lastPromptAt
+                        ) ? candidate.key : nil
+                    }
+                }.value
+                for key in completedKeys {
+                    guard let current = self.store.sessions.first(where: { $0.key == key }),
+                          current.state == .working else { continue }
+                    self.receive(BridgeEvent(
+                        kind: .responseCompleted,
+                        source: key.source,
+                        sessionID: key.sessionID
+                    ))
+                }
+            }
         }
     }
 
