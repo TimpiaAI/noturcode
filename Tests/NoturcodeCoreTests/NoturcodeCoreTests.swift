@@ -513,7 +513,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("unread-completion-"))
     }
 
-    func testSessionDockReflectsPersistentUnreadCompletionState() throws {
+    func testCollapsedPillReflectsPersistentUnreadCompletionState() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -522,8 +522,7 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(notch.contains("completionReads: model.completionReads"))
         XCTAssertTrue(notch.contains("completionReads.isUnread(session)"))
-        XCTAssertTrue(notch.contains("isUnread: completionReads.isUnread(session)"))
-        XCTAssertTrue(notch.contains("completionIsUnread: isUnread"))
+        XCTAssertTrue(notch.contains("completionIsUnread: completionReads.isUnread(session)"))
         XCTAssertFalse(notch.contains("CollapsedCompletionOutline"))
     }
 
@@ -623,17 +622,18 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("disconnect-noturcode-"))
     }
 
-    func testSessionDockPlacesOneContinuousRailBelowHardwareNotch() throws {
+    func testCollapsedSessionsSplitOnlyAroundARealHardwareNotch() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let notch = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
 
-        XCTAssertTrue(notch.contains(".padding(.top, metrics.hasHardwareNotch ? metrics.neckHeight : 0)"))
-        XCTAssertTrue(notch.contains("ForEach(visibleSessions)"))
-        XCTAssertFalse(notch.contains("marbleGroup(working)"))
-        XCTAssertFalse(notch.contains("marbleGroup(attention)"))
+        XCTAssertTrue(notch.contains("if metrics.hasHardwareNotch"))
+        XCTAssertTrue(notch.contains("marbleGroup(sessions)"))
+        XCTAssertTrue(notch.contains("marbleGroup(working)"))
+        XCTAssertTrue(notch.contains("marbleGroup(attention)"))
+        XCTAssertFalse(notch.contains("Spacer(minLength: 4)"))
     }
 
     func testWorkflowAgentSelectionLoadsItsOwnConversation() throws {
@@ -942,25 +942,16 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(URLComponents(url: try XCTUnwrap(target.revealURL), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "w0t1p2:ABC DEF")
     }
 
-    func testSessionDockKeepsStableGeometryAndRoutesPrimaryActions() throws {
+    func testPillActivityCollapseCoordinatesOuterAndInnerGeometry() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
-        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
 
-        XCTAssertTrue(surface.contains("struct SessionDock"))
-        XCTAssertTrue(surface.contains("accessibilityIdentifier(\"session-dock\")"))
-        XCTAssertTrue(surface.contains("onOpenWorkspace: model.showStatusWindow"))
-        XCTAssertTrue(surface.contains("state.select(session) { model.jump(to: session) }"))
-        XCTAssertTrue(surface.contains(".scaleEffect(isHovered ? 1.12 : 1)"))
-        XCTAssertTrue(surface.contains(".offset(y: isHovered ? -2 : 0)"))
-        XCTAssertFalse(surface.contains("ExpandedSessionList("))
-        XCTAssertFalse(surface.contains("state.isExpanded"))
-        XCTAssertTrue(coordinator.contains("height = metrics.dockHeight"))
-        XCTAssertTrue(coordinator.contains("var surfaceTopInset: CGFloat { 0 }"))
-        XCTAssertFalse(coordinator.contains("try await Task.sleep(for: .milliseconds(230))"))
+        XCTAssertTrue(surface.contains("value: surfaceHeight"))
+        XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
     }
 
     func testDoneSummaryGetsTwoLinesAndResponseScopedHoverPopover() throws {
