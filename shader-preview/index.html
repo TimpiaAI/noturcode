@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Noturcode Agent Marble Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f5f5f2;
+      --muted: rgba(245, 245, 242, 0.48);
+      --line: rgba(255, 255, 255, 0.085);
+      --panel: rgba(18, 19, 21, 0.88);
+      --lime: #99ff38;
+      --primary: rgb(153 115 240);
+      --secondary: rgb(218 146 255);
+      --primary-glow: rgb(153 115 240 / 0.25);
+      --attention-glow: rgb(153 115 240 / 0.52);
+      --size: 190px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: "Avenir Next", Avenir, "Helvetica Neue", sans-serif;
+      background:
+        radial-gradient(circle at 50% -20%, rgba(255, 255, 255, 0.075), transparent 42%),
+        #08090a;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      content: "";
+      opacity: 0.16;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
+      mix-blend-mode: soft-light;
+    }
+
+    button, input, select { font: inherit; }
+
+    .shell {
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 38px 0 48px;
+    }
+
+    header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 28px;
+      padding-bottom: 26px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow,
+    .label {
+      color: var(--muted);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 720px;
+      margin: 8px 0 0;
+      font-size: clamp(30px, 4vw, 54px);
+      font-weight: 560;
+      letter-spacing: -0.045em;
+      line-height: 0.98;
+    }
+
+    .truth {
+      max-width: 340px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .truth strong { color: rgba(255, 255, 255, 0.82); }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.75fr);
+      gap: 14px;
+      padding-top: 14px;
+    }
+
+    .panel {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      background: var(--panel);
+      box-shadow: 0 28px 80px rgba(0, 0, 0, 0.34);
+    }
+
+    .stage {
+      min-height: 610px;
+      display: grid;
+      place-items: center;
+      isolation: isolate;
+    }
+
+    .stage::after {
+      position: absolute;
+      z-index: -1;
+      width: 440px;
+      height: 440px;
+      border: 1px solid rgba(255, 255, 255, 0.045);
+      border-radius: 50%;
+      content: "";
+      box-shadow: inset 0 0 80px rgba(255, 255, 255, 0.018);
+    }
+
+    .stage-copy {
+      position: absolute;
+      top: 24px;
+      left: 26px;
+    }
+
+    .hero {
+      display: grid;
+      justify-items: center;
+      gap: 28px;
+    }
+
+    .marble-wrap {
+      position: relative;
+      width: var(--size);
+      height: var(--size);
+      display: grid;
+      place-items: center;
+      filter: drop-shadow(0 18px 36px rgba(0, 0, 0, 0.48));
+    }
+
+    .marble {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background:
+        radial-gradient(circle at 31% 24%, rgba(255, 255, 255, 0.68) 0%, rgba(255, 255, 255, 0.05) 38%, transparent 55%),
+        linear-gradient(45deg, var(--primary), var(--secondary));
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .marble-wrap[data-state="idle"] .marble { opacity: 0.58; }
+    .marble-wrap[data-state="asking"] .marble { box-shadow: 0 0 34px var(--attention-glow); }
+
+    .ring {
+      position: absolute;
+      inset: -9px;
+      border: 4px solid rgba(255, 255, 255, 0.24);
+      border-radius: 50%;
+    }
+
+    [data-state="working"] .ring {
+      border-color: rgba(255, 255, 255, 0.20);
+    }
+
+    [data-state="working"] .ring::after {
+      position: absolute;
+      inset: -5px;
+      border-radius: 50%;
+      content: "";
+      background: conic-gradient(rgba(255, 255, 255, 0.98) 0 16%, transparent 16% 100%);
+      mask: radial-gradient(farthest-side, transparent calc(100% - 5px), #000 calc(100% - 4px));
+      animation: clockwise 1.05s linear infinite;
+    }
+
+    [data-state="asking"] .ring {
+      border-color: rgba(255, 255, 255, 0.70);
+      animation: ask 1.31s ease-in-out infinite;
+    }
+
+    [data-state="done"] .ring { border-color: rgba(255, 255, 255, 0.30); }
+    [data-state="done"][data-unread="true"] .ring { border-color: var(--lime); }
+    [data-state="failed"] .ring { border-style: dashed; border-color: rgba(255, 255, 255, 0.78); }
+    [data-state="idle"] .ring { border-width: 2px; border-color: rgba(255, 255, 255, 0.24); }
+
+    @keyframes clockwise { to { transform: rotate(360deg); } }
+    @keyframes ask {
+      0%, 100% { opacity: 0.42; transform: scale(0.985); }
+      50% { opacity: 0.97; transform: scale(1.015); }
+    }
+
+    .nameplate { text-align: center; }
+    .nameplate strong { display: block; font-size: 23px; letter-spacing: -0.025em; }
+    .nameplate span { color: var(--muted); font-size: 12px; }
+
+    .controls {
+      display: grid;
+      align-content: start;
+      gap: 18px;
+      padding: 24px;
+    }
+
+    .control { display: grid; gap: 8px; }
+
+    input[type="text"], select {
+      width: 100%;
+      height: 44px;
+      padding: 0 13px;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      outline: none;
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    input[type="text"]:focus, select:focus { border-color: rgba(255, 255, 255, 0.28); }
+
+    .check {
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 13px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: rgba(255, 255, 255, 0.74);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .check input { accent-color: var(--lime); }
+
+    .numbers {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+
+    .number {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.025);
+    }
+
+    .number b {
+      display: block;
+      margin-top: 4px;
+      font: 600 13px "SFMono-Regular", Consolas, monospace;
+    }
+
+    .variants {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1px;
+      padding: 1px;
+      background: var(--line);
+    }
+
+    .variant {
+      min-height: 150px;
+      display: grid;
+      place-items: center;
+      gap: 12px;
+      padding: 20px;
+      border: 0;
+      color: var(--ink);
+      background: #111214;
+      cursor: pointer;
+    }
+
+    .variant:hover, .variant:focus-visible { background: #18191c; outline: none; }
+    .variant .marble-wrap { --size: 48px; }
+    .variant .ring { inset: -4px; border-width: 2px; }
+    .variant [data-state="working"] .ring::after {
+      inset: -3px;
+      mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+    }
+    .variant span { color: var(--muted); font-size: 11px; text-transform: capitalize; }
+
+    footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 20px 4px 0;
+      color: var(--muted);
+      font: 10px/1.5 "SFMono-Regular", Consolas, monospace;
+    }
+
+    @media (max-width: 800px) {
+      header { align-items: flex-start; flex-direction: column; }
+      main { grid-template-columns: 1fr; }
+      .stage { min-height: 480px; }
+      .variants { grid-template-columns: repeat(2, 1fr); }
+      footer { flex-direction: column; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Noturcode / visual system 01</div>
+        <h1>Agent marble laboratory.</h1>
+      </div>
+      <p class="truth"><strong>No Metal shader is active in the app.</strong> This page rebuilds the current SwiftUI linear gradient, radial highlight, glow, and Core Animation state rings.</p>
+    </header>
+
+    <main>
+      <section class="panel stage">
+        <div class="stage-copy label">Live output</div>
+        <div class="hero">
+          <div class="marble-wrap" id="heroMarble" data-state="working" data-unread="false" aria-label="Live agent marble">
+            <div class="marble"></div>
+            <div class="ring"></div>
+          </div>
+          <div class="nameplate">
+            <strong id="nameOutput">fidelizare</strong>
+            <span id="stateOutput">working / clockwise ring</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel controls">
+        <div class="label">Input</div>
+        <label class="control">
+          <span class="label">Session name</span>
+          <input id="nameInput" type="text" value="fidelizare" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="control">
+          <span class="label">State</span>
+          <select id="stateInput">
+            <option value="working">Working</option>
+            <option value="asking">Asking you</option>
+            <option value="done">Done</option>
+            <option value="failed">Failed</option>
+            <option value="idle">Idle</option>
+          </select>
+        </label>
+        <label class="check">
+          <span>Unread completion</span>
+          <input id="unreadInput" type="checkbox">
+        </label>
+        <div class="numbers">
+          <div class="number"><span class="label">Primary</span><b id="primaryOutput">hsl(0)</b></div>
+          <div class="number"><span class="label">Secondary</span><b id="secondaryOutput">hsl(0)</b></div>
+          <div class="number"><span class="label">Saturation</span><b>52%</b></div>
+          <div class="number"><span class="label">Brightness</span><b>94%</b></div>
+        </div>
+      </aside>
+
+      <section id="thinking-orb-root" class="panel orb-lab-shell" aria-label="Thinking Orb color laboratory">
+        <noscript>Enable JavaScript to run the Thinking Orb laboratory.</noscript>
+      </section>
+
+      <section class="panel variants" aria-label="Agent states">
+        <button class="variant" data-pick="working">
+          <span class="marble-wrap" data-state="working"><i class="marble" aria-hidden="true">&#8203;</i><i class="ring" aria-hidden="true">&#8203;</i></span>
+          <span>working</span>
+        </button>
+        <button class="variant" data-pick="asking">
+          <span class="marble-wrap" data-state="asking"><i class="marble" aria-hidden="true">&#8203;</i><i class="ring" aria-hidden="true">&#8203;</i></span>
+          <span>asking you</span>
+        </button>
+        <button class="variant" data-pick="done">
+          <span class="marble-wrap" data-state="done"><i class="marble" aria-hidden="true">&#8203;</i><i class="ring" aria-hidden="true">&#8203;</i></span>
+          <span>done / seen</span>
+        </button>
+        <button class="variant" data-pick="done-unread">
+          <span class="marble-wrap" data-state="done" data-unread="true"><i class="marble" aria-hidden="true">&#8203;</i><i class="ring" aria-hidden="true">&#8203;</i></span>
+          <span>done / unread</span>
+        </button>
+        <button class="variant" data-pick="failed">
+          <span class="marble-wrap" data-state="failed"><i class="marble" aria-hidden="true">&#8203;</i><i class="ring" aria-hidden="true">&#8203;</i></span>
+          <span>failed</span>
+        </button>
+      </section>
+    </main>
+
+    <footer>
+      <span>COLOR = FNV-1A(session name) / 64-bit / deterministic</span>
+      <span>RING = working 1.05s / asking 1.31s / reduced motion supported</span>
+    </footer>
+  </div>
+
+  <script>
+    const root = document.documentElement;
+    const hero = document.querySelector('#heroMarble');
+    const nameInput = document.querySelector('#nameInput');
+    const stateInput = document.querySelector('#stateInput');
+    const unreadInput = document.querySelector('#unreadInput');
+    const nameOutput = document.querySelector('#nameOutput');
+    const stateOutput = document.querySelector('#stateOutput');
+    const primaryOutput = document.querySelector('#primaryOutput');
+    const secondaryOutput = document.querySelector('#secondaryOutput');
+    const mask = (1n << 64n) - 1n;
+
+    function normalizedName(value) {
+      return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase().trim();
+    }
+
+    function hsvToRgb(hue, saturation, value) {
+      const h = ((hue % 360) + 360) % 360 / 60;
+      const chroma = value * saturation;
+      const x = chroma * (1 - Math.abs((h % 2) - 1));
+      const match = value - chroma;
+      const sectors = [[chroma, x, 0], [x, chroma, 0], [0, chroma, x], [0, x, chroma], [x, 0, chroma], [chroma, 0, x]];
+      return sectors[Math.floor(h) % 6].map((channel) => Math.round((channel + match) * 255));
+    }
+
+    function rgbCss(rgb, alpha = 1) {
+      return alpha === 1 ? `rgb(${rgb.join(' ')})` : `rgb(${rgb.join(' ')} / ${alpha})`;
+    }
+
+    function hex(rgb) {
+      return `#${rgb.map((channel) => channel.toString(16).padStart(2, '0')).join('').toUpperCase()}`;
+    }
+
+    function avatarIdentity(value) {
+      let hash = 14695981039346656037n;
+      for (const byte of new TextEncoder().encode(normalizedName(value))) {
+        hash ^= BigInt(byte);
+        hash = (hash * 1099511628211n) & mask;
+      }
+      const base = Number(hash % 360n);
+      const direction = ((hash >> 12n) & 1n) === 0n ? 1 : -1;
+      const offset = 27 + Number((hash >> 16n) % 25n) / 10;
+      const secondary = (base + direction * offset + 360) % 360;
+      return {
+        primaryHue: base,
+        secondaryHue: secondary,
+        primary: hsvToRgb(base, 0.52, 0.94),
+        secondary: hsvToRgb(secondary, 0.52 * 0.82, 1.0)
+      };
+    }
+
+    function update() {
+      const name = nameInput.value || 'unnamed';
+      const colors = avatarIdentity(name);
+      const state = stateInput.value;
+      const unread = unreadInput.checked;
+      root.style.setProperty('--primary', rgbCss(colors.primary));
+      root.style.setProperty('--secondary', rgbCss(colors.secondary));
+      root.style.setProperty('--primary-glow', rgbCss(colors.primary, 0.25));
+      root.style.setProperty('--attention-glow', rgbCss(colors.primary, 0.52));
+      hero.dataset.state = state;
+      hero.dataset.unread = String(unread);
+      nameOutput.textContent = name;
+      stateOutput.textContent = state === 'working' ? 'working / clockwise ring' : state;
+      primaryOutput.textContent = hex(colors.primary);
+      secondaryOutput.textContent = hex(colors.secondary);
+      window.noturcodePreviewState = {
+        name,
+        primary: colors.primary,
+        secondary: colors.secondary,
+        state,
+        unread
+      };
+      window.dispatchEvent(new CustomEvent('noturcode:identity', { detail: window.noturcodePreviewState }));
+    }
+
+    nameInput.addEventListener('input', update);
+    stateInput.addEventListener('change', update);
+    unreadInput.addEventListener('change', update);
+
+    document.querySelectorAll('[data-pick]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const value = button.dataset.pick;
+        stateInput.value = value === 'done-unread' ? 'done' : value;
+        unreadInput.checked = value === 'done-unread';
+        update();
+      });
+    });
+
+    update();
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

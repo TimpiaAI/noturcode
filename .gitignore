@@ -11,6 +11,7 @@ context/
 debug/
 tmp/
 nanobanana-output/
+node_modules/
 research/
 qa/
 Design/

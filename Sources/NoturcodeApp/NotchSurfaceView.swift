@@ -340,8 +340,8 @@ private struct AdaptiveDockHeader: View {
         return HStack(spacing: 5) {
             SessionMarble(
                 session: session,
-                size: 15,
-                animate: session.id == animatedSessionID,
+                size: 20,
+                animate: true,
                 completionIsUnread: completionReads.isUnread(session)
             )
             Text(session.name)
@@ -381,7 +381,7 @@ private struct AdaptiveDockHeader: View {
                     name: "More sessions",
                     state: overflowState,
                     source: nil,
-                    size: 15,
+                    size: 20,
                     animate: true,
                     completionIsUnread: completionIsUnread
                 )

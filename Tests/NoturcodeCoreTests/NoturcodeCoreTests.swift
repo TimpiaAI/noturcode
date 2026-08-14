@@ -656,6 +656,24 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains(".animation(reduceMotion ? nil : .smooth(duration: 0.24), value: completionIsUnread)"))
     }
 
+    func testSessionMarbleUsesColoredThinkingOrbMotionsInsideNativeStateRing() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let views = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+
+        XCTAssertTrue(views.contains("private struct ColoredThinkingOrb"))
+        XCTAssertTrue(views.contains("case .working, .askingYou: .composing"))
+        XCTAssertTrue(views.contains("case .done: .breathing"))
+        XCTAssertTrue(views.contains("&& animate\n            && size >= 12"))
+        XCTAssertTrue(views.contains("state == .working || state == .askingYou || state == .done"))
+        XCTAssertTrue(views.contains("primaryHue: identity.hue"))
+        XCTAssertTrue(views.contains("secondaryHue: identity.secondaryHue"))
+        XCTAssertTrue(views.contains("stateRing(time:"))
+        XCTAssertFalse(views.contains("private var marbleSurface"))
+    }
+
     func testAttentionAnnouncementUsesOneCursorAnchoredFloatingPanel() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1334,6 +1352,8 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("overflowChip(sessions: hiddenSessions, width: chipWidth)"))
         XCTAssertTrue(surface.contains("private func overflowState(for sessions: [TrackedSession]) -> SessionState"))
         XCTAssertTrue(surface.contains("SessionMarble(") && surface.contains("name: \"More sessions\""))
+        XCTAssertTrue(surface.contains("size: 20"))
+        XCTAssertTrue(surface.contains("animate: true"))
         XCTAssertTrue(surface.contains("Text(overflowState.displayName.lowercased())"))
         XCTAssertTrue(surface.contains(".frame(width: width, height: 30, alignment: .leading)"))
         XCTAssertTrue(surface.contains("onShowAll: { state.expand() }"))

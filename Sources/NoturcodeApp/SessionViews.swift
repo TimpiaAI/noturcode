@@ -80,21 +80,35 @@ struct SessionMarble: View {
 
     private var identity: AvatarIdentity { AvatarIdentity(name: name) }
 
-    private var primaryColor: Color {
-        Color(hue: identity.hue, saturation: identity.saturation, brightness: identity.brightness)
-    }
-
-    private var secondaryColor: Color {
-        Color(hue: identity.secondaryHue, saturation: identity.saturation * 0.82, brightness: 1.0)
-    }
-
     private var animatesAttention: Bool {
         animate && !reduceMotion && state == .askingYou
     }
 
+    private var orbMotion: ColoredThinkingOrb.Motion {
+        switch state {
+        case .working, .askingYou: .composing
+        case .done: .breathing
+        case .failed, .idle: .breathing
+        }
+    }
+
+    private var animatesOrb: Bool {
+        !reduceMotion
+            && animate
+            && size >= 12
+            && (state == .working || state == .askingYou || state == .done)
+    }
+
     var body: some View {
         ZStack {
-            marbleSurface
+            ColoredThinkingOrb(
+                motion: orbMotion,
+                size: size,
+                primaryHue: identity.hue,
+                secondaryHue: identity.secondaryHue,
+                saturation: identity.saturation,
+                isAnimated: animatesOrb
+            )
 
             if animatesAttention {
                 TimelineView(.animation(minimumInterval: 1 / 15)) { context in
@@ -112,32 +126,6 @@ struct SessionMarble: View {
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: completionIsUnread)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(name), \(source?.displayName ?? "session"), \(state.displayName)")
-    }
-
-    private var marbleColor: Color {
-        primaryColor
-    }
-
-    private var marbleSurface: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [primaryColor, secondaryColor],
-                    startPoint: .bottomLeading,
-                    endPoint: .topTrailing
-                )
-            )
-            .overlay {
-                RadialGradient(
-                    colors: [.white.opacity(0.68), .white.opacity(0.05), .clear],
-                    center: UnitPoint(x: 0.31, y: 0.24),
-                    startRadius: 0,
-                    endRadius: size * 0.55
-                )
-                .clipShape(Circle())
-            }
-            .opacity(state == .idle ? 0.58 : 1)
-            .shadow(color: marbleColor.opacity(state.needsAttention ? 0.52 : 0.25), radius: state.needsAttention ? 5 : 2)
     }
 
     @ViewBuilder
@@ -175,6 +163,179 @@ struct SessionMarble: View {
                 .stroke(.white.opacity(0.24), lineWidth: 1)
                 .padding(-1.8)
         }
+    }
+}
+
+// Native SwiftUI port of the public thinking-orbs ribbon/ring geometry.
+// The geometry stays compatible with the MIT-licensed Canvas engine while
+// Noturcode paints every dot with the session's deterministic color pair.
+private struct ColoredThinkingOrb: View {
+    enum Motion {
+        case composing
+        case breathing
+    }
+
+    let motion: Motion
+    let size: CGFloat
+    let primaryHue: Double
+    let secondaryHue: Double
+    let saturation: Double
+    let isAnimated: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 24, paused: !isAnimated)) { timeline in
+            Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: true) { context, canvasSize in
+                let time = isAnimated ? timeline.date.timeIntervalSinceReferenceDate : 0.6
+                draw(in: &context, canvasSize: canvasSize, time: time)
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private struct OrbDot {
+        let point: CGPoint
+        let depth: Double
+        let radius: Double
+        let ink: Double
+        let opacity: Double
+    }
+
+    private func draw(in context: inout GraphicsContext, canvasSize: CGSize, time: TimeInterval) {
+        let drawingSize = Double(min(canvasSize.width, canvasSize.height))
+        guard drawingSize > 0 else { return }
+        let speed = motion == .composing ? 3.12 : 3.78
+        let t = time * speed
+        let radius = drawingSize * 0.39
+        let cameraTilt = 0.3
+        let radiusScale = pow(drawingSize / 300, 0.6)
+        let isFaceOn = motion == .breathing
+        var dots: [OrbDot] = []
+
+        if !isFaceOn {
+            let ghostCount = max(5, Int((drawingSize / 20 * 8).rounded()))
+            for index in 0..<ghostCount {
+                let direction = fibonacciDirection(index: index, count: ghostCount)
+                let projected = project(
+                    x: direction.x * radius,
+                    y: direction.y * radius,
+                    z: direction.z * radius,
+                    tilt: cameraTilt,
+                    center: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                )
+                let depth = (projected.z / radius + 1) / 2
+                dots.append(
+                    OrbDot(
+                        point: projected.point,
+                        depth: projected.z,
+                        radius: max(0.25, 0.8 * radiusScale),
+                        ink: 0.78,
+                        opacity: 0.10 + 0.22 * depth
+                    )
+                )
+            }
+        }
+
+        let angle = isFaceOn ? -cameraTilt : 0.55
+        let ux = 1.0
+        let uz = 0.0
+        let vx = -uz * sin(angle)
+        let vy = cos(angle)
+        let vz = ux * sin(angle)
+        let nx = -uz * vy
+        let ny = uz * vx - ux * vz
+        let nz = ux * vy
+        let wobbleMultiplier = isFaceOn ? 0.565 : 1.0
+        let wobbleAmplitude = 0.23 * wobbleMultiplier
+        let baseRadius = isFaceOn ? radius / (1 + 0.85 * wobbleAmplitude) : radius
+        let laneCount = isFaceOn ? 8 : 10
+        let segmentCount = max(isFaceOn ? 15 : 20, Int((drawingSize * (isFaceOn ? 0.75 : 1.0)).rounded()))
+        let baseDotRadius = (isFaceOn ? 1.1 * 1.622 : 1.1 * 1.073)
+        let depthDotRadius = (isFaceOn ? 1.7 * 1.622 : 1.7 * 1.073)
+
+        for lane in 0..<laneCount {
+            let laneOffset = (Double(lane) - Double(laneCount - 1) / 2) * 0.075
+            let edge = abs(Double(lane) - Double(laneCount - 1) / 2) / max(1, Double(laneCount - 1) / 2)
+            for segment in 0..<segmentCount {
+                let a = Double(segment) / Double(segmentCount) * 2 * .pi
+                let wobble = (
+                    0.16 * sin(a * 3 - t * 1.7 + Double(lane) * 0.22)
+                        + 0.07 * sin(a * 5 + t * 1.1)
+                ) * wobbleMultiplier
+                let radial = isFaceOn ? 1 + wobble : 1
+                let offset = isFaceOn ? laneOffset : laneOffset + wobble
+                let x = ux * cos(a) + vx * sin(a) + nx * offset
+                let y = vy * sin(a) + ny * offset
+                let z = uz * cos(a) + vz * sin(a) + nz * offset
+                let length = sqrt(x * x + y * y + z * z)
+                let scaledRadius = baseRadius * radial
+                let projected = project(
+                    x: x / length * scaledRadius,
+                    y: y / length * scaledRadius,
+                    z: z / length * scaledRadius,
+                    tilt: cameraTilt,
+                    center: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+                )
+                let depth = (projected.z / radius + 1) / 2
+                let dotRadius = (baseDotRadius + depthDotRadius * depth) * (1 - 0.25 * edge) * radiusScale
+                dots.append(
+                    OrbDot(
+                        point: projected.point,
+                        depth: projected.z,
+                        radius: max(0.25, dotRadius),
+                        ink: 0.52 - 0.44 * depth + 0.18 * edge,
+                        opacity: 0.40 + 0.60 * depth
+                    )
+                )
+            }
+        }
+        for dot in dots.sorted(by: { $0.depth < $1.depth }) {
+            let rect = CGRect(
+                x: dot.point.x - CGFloat(dot.radius),
+                y: dot.point.y - CGFloat(dot.radius),
+                width: CGFloat(dot.radius * 2),
+                height: CGFloat(dot.radius * 2)
+            )
+            context.fill(Path(ellipseIn: rect), with: .color(color(ink: dot.ink, opacity: dot.opacity)))
+        }
+    }
+
+    private func color(ink: Double, opacity: Double) -> Color {
+        let depth = min(1, max(0, 1 - ink))
+        var hueDelta = primaryHue - secondaryHue
+        if hueDelta > 0.5 { hueDelta -= 1 }
+        if hueDelta < -0.5 { hueDelta += 1 }
+        var hue = secondaryHue + hueDelta * depth
+        if hue < 0 { hue += 1 }
+        if hue >= 1 { hue -= 1 }
+        return Color(
+            hue: hue,
+            saturation: saturation * (0.78 + 0.22 * depth),
+            brightness: 0.70 + 0.30 * depth,
+            opacity: opacity
+        )
+    }
+
+    private func fibonacciDirection(index: Int, count: Int) -> (x: Double, y: Double, z: Double) {
+        let y = 1 - (Double(index) + 0.5) / Double(count) * 2
+        let radial = sqrt(max(0, 1 - y * y))
+        let angle = Double(index) * .pi * (3 - sqrt(5))
+        return (cos(angle) * radial, y, sin(angle) * radial)
+    }
+
+    private func project(
+        x: Double,
+        y: Double,
+        z: Double,
+        tilt: Double,
+        center: CGPoint
+    ) -> (point: CGPoint, z: Double) {
+        let projectedY = y * cos(tilt) - z * sin(tilt)
+        let projectedZ = y * sin(tilt) + z * cos(tilt)
+        return (
+            CGPoint(x: center.x + x, y: center.y - projectedY),
+            projectedZ
+        )
     }
 }
 

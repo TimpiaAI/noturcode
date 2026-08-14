@@ -1,0 +1,27 @@
+{
+  "name": "shader-preview",
+  "version": "1.0.0",
+  "description": "Live Noturcode agent marble and Thinking Orb color laboratory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "noturcode",
+    "thinking-orbs",
+    "agent-ui"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "thinking-orbs": "^0.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1"
+  }
+}

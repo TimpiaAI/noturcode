@@ -1,0 +1,164 @@
+.orb-lab-shell {
+  grid-column: 1 / -1;
+}
+
+.orb-lab {
+  min-height: 420px;
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  grid-template-areas:
+    "copy comparison"
+    "controls controls";
+  gap: 0;
+}
+
+.orb-lab-copy {
+  grid-area: copy;
+  padding: 34px;
+  border-right: 1px solid var(--line);
+}
+
+.orb-kicker {
+  color: var(--muted);
+  font: 700 10px "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.orb-lab h2 {
+  margin: 22px 0 16px;
+  font-size: clamp(32px, 4vw, 52px);
+  font-weight: 560;
+  letter-spacing: -0.05em;
+  line-height: 0.96;
+}
+
+.orb-lab-copy p {
+  max-width: 420px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.orb-color-pair {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-top: 34px;
+  color: rgba(255, 255, 255, 0.72);
+  font: 600 11px "SFMono-Regular", Consolas, monospace;
+}
+
+.orb-color-pair i {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #141517;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.orb-color-pair i + i { margin-left: -7px; }
+.orb-color-pair span { margin-left: 12px; }
+
+.orb-comparison {
+  grid-area: comparison;
+  display: grid;
+  grid-template-columns: 1fr 30px 1fr;
+  align-items: center;
+  padding: 34px;
+  background: radial-gradient(circle at 70% 50%, var(--primary-glow), transparent 34%);
+}
+
+.orb-comparison figure {
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  margin: 0;
+}
+
+.orb-stage {
+  width: 128px;
+  height: 128px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.orb-stage canvas {
+  width: 88px !important;
+  height: 88px !important;
+  image-rendering: auto;
+}
+
+.custom-orb {
+  box-shadow: 0 0 46px color-mix(in srgb, var(--orb-glow) 18%, transparent);
+}
+
+.orb-comparison figcaption,
+.orb-arrow {
+  color: var(--muted);
+  font: 600 10px "SFMono-Regular", Consolas, monospace;
+  text-transform: uppercase;
+}
+
+.orb-arrow { text-align: center; }
+
+.orb-controls {
+  grid-area: controls;
+  display: grid;
+  grid-template-columns: 1fr 0.62fr 1fr 0.9fr;
+  gap: 10px;
+  padding: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.orb-controls label {
+  min-height: 62px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.orb-controls label > span {
+  color: var(--muted);
+  font: 700 9px "SFMono-Regular", Consolas, monospace;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+
+.orb-controls select {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.orb-controls input[type="range"] {
+  width: 100%;
+  accent-color: var(--primary);
+}
+
+.orb-controls .orb-toggle {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  cursor: pointer;
+}
+
+.orb-toggle input { accent-color: var(--lime); }
+
+@media (max-width: 800px) {
+  .orb-lab {
+    grid-template-columns: 1fr;
+    grid-template-areas: "copy" "comparison" "controls";
+  }
+
+  .orb-lab-copy { border-right: 0; border-bottom: 1px solid var(--line); }
+  .orb-controls { grid-template-columns: 1fr 1fr; }
+}
