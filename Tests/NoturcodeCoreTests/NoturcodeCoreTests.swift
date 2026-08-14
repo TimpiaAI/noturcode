@@ -966,6 +966,23 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
     }
 
+    func testCompactPillShowsBrandAndBoundedLiveActivity() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+
+        XCTAssertTrue(surface.contains("NoturcodeBrandMark(size:"))
+        XCTAssertTrue(surface.contains("private var compactActivityText: String"))
+        XCTAssertTrue(surface.contains("session.currentActivity"))
+        XCTAssertTrue(surface.contains("Text(session.name)"))
+        XCTAssertTrue(surface.contains(".lineLimit(1)"))
+        XCTAssertTrue(surface.contains("Array(values.prefix(3))"))
+        XCTAssertTrue(coordinator.contains("max(248"))
+    }
+
     func testDoneSummaryGetsTwoLinesAndResponseScopedHoverPopover() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

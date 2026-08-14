@@ -200,28 +200,76 @@ private struct RestIndicatorView: View {
         attention.first?.id ?? working.first?.id
     }
 
+    private var primarySession: TrackedSession? {
+        sessions.first(where: { $0.state == .working })
+            ?? attention.first
+            ?? sessions.first
+    }
+
+    private var compactActivityText: String {
+        guard let session = primarySession else { return "Connected" }
+        let raw = session.currentActivity?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return session.state.displayName }
+
+        // The compact surface describes the operation, never its command,
+        // arguments, paths, or prompt contents.
+        let firstLine = raw.components(separatedBy: .newlines).first ?? raw
+        let operation = firstLine.components(separatedBy: " · ").first ?? firstLine
+        return String(operation.prefix(32))
+    }
+
     var body: some View {
         Group {
             if metrics.hasHardwareNotch {
                 HStack(spacing: 7) {
+                    NoturcodeBrandMark(size: 17)
                     marbleGroup(working)
                     Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
+                    compactActivityLabel
                     marbleGroup(attention)
                 }
             } else {
-                marbleGroup(sessions)
+                HStack(spacing: 8) {
+                    NoturcodeBrandMark(size: 17)
+                    Rectangle()
+                        .fill(.white.opacity(0.12))
+                        .frame(width: 1, height: 16)
+                    marbleGroup(sessions)
+                    compactActivityLabel
+                }
             }
         }
         .padding(.horizontal, metrics.hasHardwareNotch ? 7 : 13)
         .frame(maxHeight: metrics.neckHeight)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Noturcode, \(sessions.count) connected sessions")
+        .accessibilityLabel(
+            "Noturcode, \(sessions.count) connected sessions, \(primarySession?.name ?? "no session"), \(compactActivityText)"
+        )
+        .animation(.easeOut(duration: 0.14), value: compactActivityText)
+    }
+
+    @ViewBuilder
+    private var compactActivityLabel: some View {
+        if let session = primarySession {
+            HStack(spacing: 4) {
+                Text(session.name)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                Text("· \(compactActivityText)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+            }
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: metrics.hasHardwareNotch ? 112 : 146, alignment: .leading)
+        }
     }
 
     @ViewBuilder
     private func marbleGroup(_ values: [TrackedSession]) -> some View {
         HStack(spacing: 5) {
-            ForEach(values) { session in
+            ForEach(Array(values.prefix(3))) { session in
                 SessionMarble(
                     session: session,
                     size: 15,
