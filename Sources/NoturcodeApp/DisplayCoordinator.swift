@@ -38,10 +38,10 @@ struct NotchMetrics: Equatable, Sendable {
     func collapsedWidth(sessionCount: Int) -> CGFloat {
         guard sessionCount > 0 else { return 0 }
         if hasHardwareNotch {
-            let extensions = CGFloat(min(12, sessionCount)) * 21 + 30
-            return min(envelopeWidth - 12, max(neckWidth + 220, neckWidth + extensions))
+            let extensions = CGFloat(sessionCount) * 88 + 176
+            return min(envelopeWidth - 12, max(neckWidth + 240, extensions))
         }
-        return min(envelopeWidth - 12, max(248, CGFloat(sessionCount) * 20 + 164))
+        return min(envelopeWidth - 12, max(340, CGFloat(sessionCount) * 88 + 176))
     }
 
     func expandedHeight(sessionCount: Int) -> CGFloat {

@@ -29,7 +29,7 @@ struct NotchSurfaceView: View {
                     + state.activityHeightAdjustment(in: store.sessions)
             )
         }
-        return max(32, metrics.neckHeight)
+        return max(40, metrics.neckHeight)
     }
 
     private var coordinatedContentTransition: AnyTransition {
@@ -112,7 +112,7 @@ struct NotchSurfaceView: View {
                 .frame(width: width, height: height)
         } else {
             styledSurface(
-                RoundedRectangle(cornerRadius: state.isExpanded ? 18 : 16, style: .continuous),
+                RoundedRectangle(cornerRadius: state.isExpanded ? 18 : 20, style: .continuous),
                 width: width,
                 height: height
             )
@@ -200,6 +200,10 @@ private struct RestIndicatorView: View {
         attention.first?.id ?? working.first?.id
     }
 
+    private var sessionIDs: [String] {
+        sessions.map(\.id)
+    }
+
     private var primarySession: TrackedSession? {
         sessions.first(where: { $0.state == .working })
             ?? attention.first
@@ -222,71 +226,84 @@ private struct RestIndicatorView: View {
     var body: some View {
         Group {
             if metrics.hasHardwareNotch {
-                HStack(spacing: 7) {
-                    NoturcodeBrandMark(size: 17)
-                    marbleGroup(working)
+                HStack(spacing: 8) {
+                    NoturcodeBrandMark(size: 19)
+                    sessionStrip(working)
                     Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
-                    compactActivityLabel
-                    marbleGroup(attention)
+                    sessionStrip(attention)
                 }
             } else {
                 HStack(spacing: 8) {
-                    NoturcodeBrandMark(size: 17)
+                    NoturcodeBrandMark(size: 19)
                     Rectangle()
                         .fill(.white.opacity(0.12))
-                        .frame(width: 1, height: 16)
-                    marbleGroup(sessions)
-                    compactActivityLabel
+                        .frame(width: 1, height: 20)
+                    sessionStrip(sessions)
                 }
             }
         }
-        .padding(.horizontal, metrics.hasHardwareNotch ? 7 : 13)
+        .padding(.horizontal, metrics.hasHardwareNotch ? 9 : 14)
         .frame(maxHeight: metrics.neckHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             "Noturcode, \(sessions.count) connected sessions, \(primarySession?.name ?? "no session"), \(compactActivityText)"
         )
         .animation(.easeOut(duration: 0.14), value: compactActivityText)
+        .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
     }
 
     @ViewBuilder
-    private var compactActivityLabel: some View {
-        if let session = primarySession {
-            HStack(spacing: 4) {
+    private func sessionStrip(_ values: [TrackedSession]) -> some View {
+        if !values.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(values) { session in
+                        sessionChip(session)
+                            .transition(.opacity.combined(with: .scale(scale: 0.92)))
+                    }
+                }
+            }
+            .scrollClipDisabled()
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func sessionChip(_ session: TrackedSession) -> some View {
+        let isPrimary = session.id == primarySession?.id
+        return HStack(spacing: 5) {
+            SessionMarble(
+                session: session,
+                size: 15,
+                animate: session.id == animatedSessionID,
+                completionIsUnread: completionReads.isUnread(session)
+            )
+            VStack(alignment: .leading, spacing: 0) {
                 Text(session.name)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.92))
-                Text("· \(compactActivityText)")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if isPrimary {
+                    Text(compactActivityText)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.52))
+                        .lineLimit(1)
+                        .contentTransition(.interpolate)
+                }
             }
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: metrics.hasHardwareNotch ? 112 : 146, alignment: .leading)
         }
-    }
-
-    @ViewBuilder
-    private func marbleGroup(_ values: [TrackedSession]) -> some View {
-        HStack(spacing: 5) {
-            ForEach(Array(values.prefix(3))) { session in
-                SessionMarble(
-                    session: session,
-                    size: 15,
-                    animate: session.id == animatedSessionID,
-                    completionIsUnread: completionReads.isUnread(session)
+        .frame(maxWidth: isPrimary ? 116 : 88, alignment: .leading)
+        .padding(.horizontal, 7)
+        .padding(.vertical, isPrimary ? 4 : 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.white.opacity(isPrimary ? 0.075 : 0.035))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(.white.opacity(isPrimary ? 0.11 : 0.055), lineWidth: 0.6)
                 )
-            }
-        }
-        .padding(.horizontal, values.isEmpty || !metrics.hasHardwareNotch ? 0 : 6)
-        .padding(.vertical, values.isEmpty || !metrics.hasHardwareNotch ? 0 : 4)
-        .background {
-            if !values.isEmpty && metrics.hasHardwareNotch {
-                Capsule(style: .continuous)
-                    .fill(Color(red: 0.025, green: 0.029, blue: 0.038).opacity(0.86))
-                    .overlay(Capsule(style: .continuous).stroke(Color.white.opacity(0.06), lineWidth: 0.6))
-            }
-        }
+        )
+        .accessibilityElement(children: .combine)
     }
 }
 

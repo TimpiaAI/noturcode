@@ -642,9 +642,9 @@ final class NoturcodeCoreTests: XCTestCase {
         let notch = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
 
         XCTAssertTrue(notch.contains("if metrics.hasHardwareNotch"))
-        XCTAssertTrue(notch.contains("marbleGroup(sessions)"))
-        XCTAssertTrue(notch.contains("marbleGroup(working)"))
-        XCTAssertTrue(notch.contains("marbleGroup(attention)"))
+        XCTAssertTrue(notch.contains("sessionStrip(sessions)"))
+        XCTAssertTrue(notch.contains("sessionStrip(working)"))
+        XCTAssertTrue(notch.contains("sessionStrip(attention)"))
         XCTAssertFalse(notch.contains("Spacer(minLength: 4)"))
     }
 
@@ -977,10 +977,13 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("NoturcodeBrandMark(size:"))
         XCTAssertTrue(surface.contains("private var compactActivityText: String"))
         XCTAssertTrue(surface.contains("session.currentActivity"))
+        XCTAssertTrue(surface.contains("private func sessionChip(_ session: TrackedSession)"))
+        XCTAssertTrue(surface.contains("ForEach(values)"))
         XCTAssertTrue(surface.contains("Text(session.name)"))
         XCTAssertTrue(surface.contains(".lineLimit(1)"))
-        XCTAssertTrue(surface.contains("Array(values.prefix(3))"))
-        XCTAssertTrue(coordinator.contains("max(248"))
+        XCTAssertTrue(surface.contains(".contentTransition(.interpolate)"))
+        XCTAssertTrue(coordinator.contains("CGFloat(sessionCount) * 88"))
+        XCTAssertTrue(coordinator.contains("max(340"))
     }
 
     func testDoneSummaryGetsTwoLinesAndResponseScopedHoverPopover() throws {
