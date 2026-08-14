@@ -160,6 +160,7 @@ private struct StatusOverviewView: View {
                         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .help("Clear session search")
             }
             .padding(.horizontal, 14)
@@ -263,6 +264,7 @@ private struct StatusOverviewView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .clickableCursor()
         .foregroundStyle(.white.opacity(selected ? 0.94 : 0.72))
         .accessibilityIdentifier("desktop-session-row")
     }
@@ -396,6 +398,7 @@ private struct DesktopHeaderControl: View {
             }
         }
         .buttonStyle(ShellPressButtonStyle(reduceMotion: reduceMotion))
+        .clickableCursor()
         .onHover { hovering in
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.10)) {
                 isHovered = hovering

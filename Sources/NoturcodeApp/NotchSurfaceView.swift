@@ -408,6 +408,7 @@ private struct AdaptiveDockHeader: View {
             )
         }
         .buttonStyle(.plain)
+        .clickableCursor()
         .accessibilityLabel("Show \(count) more connected sessions, \(overflowState.displayName.lowercased())")
     }
 }

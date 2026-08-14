@@ -552,6 +552,11 @@ private final class AnnouncementHostingView: NSHostingView<AnyView> {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
     @objc private func handleClick() {
         onClick?()
     }

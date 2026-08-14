@@ -3,6 +3,31 @@ import SwiftUI
 import NoturcodeCore
 import UniformTypeIdentifiers
 
+private final class PointingHandCursorView: NSView {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct PointingHandCursorRegion: NSViewRepresentable {
+    func makeNSView(context: Context) -> PointingHandCursorView {
+        PointingHandCursorView(frame: .zero)
+    }
+
+    func updateNSView(_ nsView: PointingHandCursorView, context: Context) {
+        nsView.window?.invalidateCursorRects(for: nsView)
+    }
+}
+
+extension View {
+    func clickableCursor() -> some View {
+        background(PointingHandCursorRegion())
+    }
+}
+
 struct NoturcodeBrandMark: View {
     let size: CGFloat
 
@@ -614,6 +639,7 @@ private struct SessionRow: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
+                    .clickableCursor()
                     .help("Disconnect from Noturcode — keeps the terminal and agent running")
                     .accessibilityLabel("Disconnect from Noturcode")
                     .accessibilityHint("Removes this card without stopping the terminal session")
@@ -631,6 +657,7 @@ private struct SessionRow: View {
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .clickableCursor()
                     .accessibilityIdentifier("view-terminal-\(session.id)")
                 }
                     .font(.system(size: 10.5, weight: .regular))
@@ -662,6 +689,7 @@ private struct SessionRow: View {
         .onTapGesture(perform: onSelect)
         .frame(maxWidth: .infinity)
         .onHover(perform: onHover)
+        .clickableCursor()
         .animation(reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0), value: isHovered)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: isPressed)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isUnreadFinished)
@@ -695,6 +723,7 @@ private struct ConversationSidebarToggle: View {
                 }
         }
         .buttonStyle(ConversationControlButtonStyle(reduceMotion: reduceMotion))
+        .clickableCursor()
         .onHover { hovering in
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.10)) {
                 isHovered = hovering
@@ -879,6 +908,7 @@ struct TerminalViewportContent: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .help(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
                 .accessibilityLabel(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
                 .accessibilityIdentifier("toggle-chat-sidebar")
@@ -895,6 +925,7 @@ struct TerminalViewportContent: View {
                         .background(.white.opacity(0.055), in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .clickableCursor()
                     .help("Compact this \(session.key.source.displayName) session")
                     .accessibilityIdentifier("compact-session")
                 }
@@ -907,6 +938,7 @@ struct TerminalViewportContent: View {
                             .background(.white.opacity(0.08), in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .clickableCursor()
                     .accessibilityLabel("Close session chat")
                     .accessibilityIdentifier("close-terminal-preview")
                 }
@@ -1069,6 +1101,7 @@ struct TerminalViewportContent: View {
                                         .background(.regularMaterial, in: Circle())
                                 }
                                 .buttonStyle(.plain)
+                                .clickableCursor()
                                 .padding(8)
                                 .help("Jump to latest message")
                                 .accessibilityIdentifier("chat-jump-to-latest")
@@ -1125,6 +1158,7 @@ struct TerminalViewportContent: View {
                         .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .accessibilityIdentifier("return-to-session-chat")
             }
         }
@@ -1236,6 +1270,7 @@ struct TerminalViewportContent: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .clickableCursor()
         .accessibilityLabel("Show workflow sidebar")
         .accessibilityIdentifier("show-chat-sidebar-rail")
         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -1366,6 +1401,7 @@ struct TerminalViewportContent: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .help("Hide sidebar")
                 .accessibilityLabel("Close workflow sidebar")
                 .accessibilityIdentifier("close-chat-sidebar")
@@ -1436,6 +1472,7 @@ struct TerminalViewportContent: View {
                             .background(.white.opacity(selectedWorkflowNodeID == node.id ? 0.09 : 0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
+                        .clickableCursor()
                         .accessibilityLabel("Open \(node.title) workflow details")
                         .accessibilityIdentifier("workflow-node-\(node.id)")
                     }
@@ -1510,6 +1547,7 @@ struct TerminalViewportContent: View {
                                         .foregroundStyle(.white, .black.opacity(0.72))
                                 }
                                 .buttonStyle(.plain)
+                                .clickableCursor()
                                 .offset(x: 4, y: -4)
                                 .accessibilityLabel("Remove \(attachment.url.lastPathComponent)")
                             }
@@ -1550,6 +1588,7 @@ struct TerminalViewportContent: View {
                         .background(canSend ? Color.white.opacity(0.92) : .white.opacity(0.07), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(!canSend)
                 .help("Send to this session (Return or ⌘↩)")
@@ -1557,6 +1596,7 @@ struct TerminalViewportContent: View {
                 .accessibilityIdentifier("send-prompt")
             }
             .buttonStyle(.plain)
+            .clickableCursor()
             .foregroundStyle(.white.opacity(0.46))
             .padding(.horizontal, 5)
             .padding(.vertical, 3)
@@ -1778,6 +1818,7 @@ private struct PromptTimelineMarker: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .clickableCursor()
         .onHover { hovering in
             if hovering {
                 previewDismissalTask?.cancel()
@@ -1986,6 +2027,7 @@ private struct ToolBatchRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .clickableCursor()
             .accessibilityLabel("\(isExpanded ? "Collapse" : "Expand") tool batch: \(summary)")
             .accessibilityIdentifier("chat-tool-batch")
 
@@ -2021,6 +2063,7 @@ private struct ToolBatchRow: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .clickableCursor()
                         .accessibilityLabel("Show tool detail: \(entry.title ?? "Tool")")
                         .accessibilityIdentifier("chat-tool-call")
                     }
@@ -2058,6 +2101,7 @@ private struct ToolDetailInspector: View {
                         .background(.white.opacity(0.07), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .accessibilityLabel("Close tool details")
             }
             .foregroundStyle(.white.opacity(0.68))
@@ -2202,6 +2246,7 @@ private struct ChatTranscriptRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .clickableCursor()
             .accessibilityLabel("Show \(entry.title ?? "tool") details")
             .accessibilityIdentifier("chat-tool-call")
         .background(.white.opacity(isHovered ? 0.065 : 0.035), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -2238,6 +2283,7 @@ private struct ChatTranscriptRow: View {
                         .background(.white.opacity(0.05), in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .clickableCursor()
                     .help("Preview \(url.path)")
                     .accessibilityLabel("Preview \(url.lastPathComponent)")
                     .accessibilityIdentifier("chat-file-reference")

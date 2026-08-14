@@ -285,6 +285,7 @@ private struct FilePreviewWindowView: View {
                         .background(.white.opacity(0.08), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .accessibilityLabel("Close file preview")
                 .accessibilityIdentifier("close-file-preview")
             }

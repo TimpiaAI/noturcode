@@ -95,6 +95,7 @@ private struct SelectionQuestionView: View {
                         .background(.white.opacity(0.07), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .keyboardShortcut(.cancelAction)
             }
 
@@ -142,6 +143,7 @@ private struct SelectionQuestionView: View {
                         .background(.white.opacity(question.isEmpty ? 0.05 : 0.12), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .clickableCursor()
                 .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
             }
             .padding(.horizontal, 10)

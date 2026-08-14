@@ -1258,8 +1258,22 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(row.contains(".fixedSize(horizontal: true, vertical: false)"))
         XCTAssertTrue(row.contains("if session.key.source != .codex"))
+        XCTAssertTrue(row.contains(".clickableCursor()"))
         XCTAssertFalse(row.contains("if let tokens = session.tokens"))
         XCTAssertFalse(row.contains("DurationFormatting.tokens"))
+    }
+
+    func testAnnouncementUsesNativePointingHandCursor() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let hostingStart = try XCTUnwrap(source.range(of: "private final class AnnouncementHostingView"))
+        let hosting = String(source[hostingStart.lowerBound...])
+
+        XCTAssertTrue(hosting.contains("override func resetCursorRects()"))
+        XCTAssertTrue(hosting.contains("addCursorRect(bounds, cursor: .pointingHand)"))
     }
 
     func testExpandedNotchShowsRotatingQuoteAndKeepsEverySessionInList() throws {
