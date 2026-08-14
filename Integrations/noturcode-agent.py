@@ -122,7 +122,7 @@ def socket_path() -> str:
 
 
 def exchange(request: dict) -> dict:
-    payload = json.dumps(request, separators=(",", ":")).encode("utf-8")
+    payload = json.dumps(request, separators=(",", ":")).encode("utf-8") + b"\n"
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     client.settimeout(2.0)
     try:

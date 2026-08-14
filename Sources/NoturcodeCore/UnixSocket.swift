@@ -183,6 +183,10 @@ public final class UnixSocketServer: @unchecked Sendable {
                     let count = Darwin.read(client, &buffer, buffer.count)
                     if count > 0 {
                         input.append(buffer, count: count)
+                        if input.last == 0x0A {
+                            input.removeLast()
+                            break
+                        }
                     } else {
                         break
                     }

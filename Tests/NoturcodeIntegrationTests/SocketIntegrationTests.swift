@@ -97,6 +97,22 @@ final class SocketIntegrationTests: XCTestCase {
         wait(for: [received], timeout: 1)
     }
 
+    func testNewlineFramedRequestStripsDelimiter() throws {
+        let socketPath = "/tmp/nc-framed-\(UUID().uuidString.prefix(8)).sock"
+        let payload = Data(#"{"type":"remotePair"}"#.utf8)
+        let server = UnixSocketServer(path: socketPath) { data in
+            XCTAssertEqual(data, payload)
+            return Data(#"{"ok":true}"#.utf8)
+        }
+        try server.start()
+        defer { server.stop() }
+
+        var request = payload
+        request.append(0x0A)
+        let response = try UnixSocketClient.send(request, path: socketPath)
+        XCTAssertEqual(String(data: response, encoding: .utf8), #"{"ok":true}"#)
+    }
+
     func testProcessInspectionReturnsCurrentExecutable() throws {
         let current = try XCTUnwrap(ProcessAncestry.inspect(pid: Int32(ProcessInfo.processInfo.processIdentifier)))
         XCTAssertEqual(current.pid, Int32(ProcessInfo.processInfo.processIdentifier))

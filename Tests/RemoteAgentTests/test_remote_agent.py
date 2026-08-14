@@ -31,6 +31,7 @@ class OneShotUnixServer:
         self.path = path
         self.response = response
         self.request = None
+        self.raw_request = b""
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.ready = threading.Event()
 
@@ -46,7 +47,8 @@ class OneShotUnixServer:
             if not chunk:
                 break
             chunks.append(chunk)
-        self.request = json.loads(b"".join(chunks).decode("utf-8"))
+        self.raw_request = b"".join(chunks)
+        self.request = json.loads(self.raw_request.decode("utf-8"))
         connection.sendall(json.dumps(self.response).encode("utf-8"))
         connection.close()
         server.close()
@@ -86,6 +88,7 @@ class RemoteAgentTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.agent.PAIR_FILE.stat().st_mode), 0o600)
         self.assertEqual(server.request["type"], "remotePair")
         self.assertEqual(server.request["code"], "123456")
+        self.assertTrue(server.raw_request.endswith(b"\n"))
 
     def test_hook_forwards_payload_and_returns_native_hook_output(self):
         self.agent.private_write(
