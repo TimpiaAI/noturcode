@@ -244,7 +244,9 @@ final class NoturcodeUITests: XCTestCase {
         app.launch()
 
         let sessionRow = app.descendants(matching: .any)["session-row-claude:ui-spotlight"].firstMatch
-        XCTAssertTrue(sessionRow.waitForExistence(timeout: 3))
+        let featuredChat = app.descendants(matching: .any)["featured-chat-claude:ui-spotlight"].firstMatch
+        XCTAssertTrue(featuredChat.waitForExistence(timeout: 3))
+        XCTAssertFalse(sessionRow.exists, "The featured chat should not be duplicated in the remaining list")
         XCTAssertFalse(app.descendants(matching: .any)["activity-expand-claude:ui-spotlight"].firstMatch.exists)
         XCTAssertFalse(app.descendants(matching: .any)["activity-scroll-claude:ui-spotlight"].firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == 'done'")).firstMatch.exists)

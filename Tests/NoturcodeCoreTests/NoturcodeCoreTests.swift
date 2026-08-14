@@ -1161,7 +1161,7 @@ final class NoturcodeCoreTests: XCTestCase {
         let headerDefinition = try XCTUnwrap(surface.range(of: "private var persistentDockHeader"))
         let composition = String(surface[stackStart.lowerBound..<headerDefinition.lowerBound])
         let header = try XCTUnwrap(composition.range(of: "persistentDockHeader"))
-        let details = try XCTUnwrap(composition.range(of: "expandedDetails"))
+        let details = try XCTUnwrap(composition.range(of: "expandedContent"))
         XCTAssertLessThan(header.lowerBound, details.lowerBound)
         XCTAssertTrue(composition.contains("if state.isExpanded"))
         XCTAssertTrue(composition.contains(".transition(coordinatedContentTransition)"))
@@ -1181,6 +1181,23 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains("activity-expand-"))
         XCTAssertFalse(sessions.contains("activity-scroll-"))
         XCTAssertFalse(sessions.contains("if isHovered || isActivityExpanded"))
+    }
+
+    func testExpandedNotchFeaturesMostRelevantChatAboveRemainingSessions() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+
+        XCTAssertTrue(surface.contains("private var featuredSession: TrackedSession?"))
+        XCTAssertTrue(surface.contains("first(where: { $0.state == .askingYou })"))
+        XCTAssertTrue(surface.contains("first(where: { $0.state == .working })"))
+        XCTAssertTrue(surface.contains("FeaturedSessionHeader("))
+        XCTAssertTrue(surface.contains("sessions: remainingSessions"))
+        XCTAssertTrue(surface.contains("Text(headerLabel)"))
+        XCTAssertTrue(surface.contains("Text(\"View chat\")"))
+        XCTAssertFalse(surface.contains("session.currentActivity"))
     }
 
     func testCompactPillShowsBrandAndEverySessionNameWithoutToolActivity() throws {

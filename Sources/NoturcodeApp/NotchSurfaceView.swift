@@ -41,6 +41,20 @@ struct NotchSurfaceView: View {
         )
     }
 
+    private var featuredSession: TrackedSession? {
+        let sessions = store.sortedSessions
+        return sessions.first(where: { $0.state == .askingYou })
+            ?? sessions.first(where: { $0.state == .working })
+            ?? sessions.first(where: { $0.state == .failed })
+            ?? sessions.first(where: { model.completionReads.isUnread($0) })
+            ?? sessions.first
+    }
+
+    private var remainingSessions: [TrackedSession] {
+        guard let featuredSession else { return store.sortedSessions }
+        return store.sortedSessions.filter { $0.id != featuredSession.id }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             if !store.sessions.isEmpty {
@@ -57,7 +71,7 @@ struct NotchSurfaceView: View {
                 VStack(spacing: 0) {
                     persistentDockHeader
                     if state.isExpanded {
-                        expandedDetails
+                        expandedContent
                             .transition(coordinatedContentTransition)
                     }
                 }
@@ -95,13 +109,22 @@ struct NotchSurfaceView: View {
         )
     }
 
-    private var expandedDetails: some View {
-        ExpandedSessionList(
-            sessions: store.sortedSessions,
-            staleMessage: store.lastStaleTargetMessage,
-            model: model,
-            state: state
-        )
+    private var expandedContent: some View {
+        VStack(spacing: 0) {
+            if let featuredSession {
+                FeaturedSessionHeader(
+                    session: featuredSession,
+                    completionIsUnread: model.completionReads.isUnread(featuredSession),
+                    onOpen: { model.showTerminalWindow(for: featuredSession) }
+                )
+            }
+            ExpandedSessionList(
+                sessions: remainingSessions,
+                staleMessage: store.lastStaleTargetMessage,
+                model: model,
+                state: state
+            )
+        }
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -140,6 +163,97 @@ struct NotchSurfaceView: View {
                 shape.stroke(Color.white.opacity(0.075), lineWidth: 0.75)
             }
             .frame(width: width, height: height)
+    }
+}
+
+private struct FeaturedSessionHeader: View {
+    let session: TrackedSession
+    let completionIsUnread: Bool
+    let onOpen: () -> Void
+
+    private var headerLabel: String {
+        switch session.state {
+        case .askingYou: "Needs you"
+        case .working: "Active chat"
+        case .failed: "Failed chat"
+        case .done: completionIsUnread ? "New completion" : "Latest chat"
+        case .idle: "Latest chat"
+        }
+    }
+
+    private var preview: String {
+        if session.state == .working {
+            let count = session.activeSubagents.count
+            return count > 0 ? "\(count) active agent\(count == 1 ? "" : "s")" : "Working on the current prompt"
+        }
+        return session.lastAgentMessage?
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
+            ?? session.state.displayName
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SessionMarble(
+                session: session,
+                size: 22,
+                animate: session.state == .working || session.state == .askingYou,
+                completionIsUnread: completionIsUnread
+            )
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(headerLabel)
+                        .font(.system(size: 8.5, weight: .bold))
+                        .textCase(.uppercase)
+                        .tracking(0.7)
+                        .foregroundStyle(.white.opacity(0.42))
+                    ProviderMark(source: session.key.source, size: 11)
+                    Text(session.name)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.94))
+                        .lineLimit(1)
+                }
+                Text(preview)
+                    .font(.system(size: 10.5, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 5) {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text("\(session.state.displayName) · \(DurationFormatting.relative(from: session.stateChangedAt, to: context.date))")
+                        .font(.system(size: 9, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.white.opacity(0.50))
+                        .lineLimit(1)
+                }
+                Button(action: onOpen) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                        Text("View chat")
+                    }
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(.white.opacity(0.07), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("featured-chat-\(session.id)")
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 66)
+        .background(.white.opacity(0.022))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(.white.opacity(0.075))
+                .frame(height: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(headerLabel), \(session.name), \(session.state.displayName)")
     }
 }
 
