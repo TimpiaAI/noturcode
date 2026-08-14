@@ -550,14 +550,9 @@ private struct SessionRow: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.95))
                             .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
                     Spacer(minLength: 6)
-                    if let tokens = session.tokens {
-                        Text(DurationFormatting.tokens(tokens))
-                            .font(.system(size: 10.5, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.white.opacity(0.46))
-                    }
                     if !session.activeSubagents.isEmpty {
                         Text("\(session.activeSubagents.count) agent\(session.activeSubagents.count == 1 ? "" : "s")")
                             .font(.system(size: 10.5, weight: .medium))

@@ -1087,6 +1087,23 @@ final class NoturcodeCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStoreUsesOnlyFirstNonEmptyLineOfConnectionName() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: .codex,
+            sessionID: "multiline-name",
+            timestamp: Date(timeIntervalSince1970: 1_000),
+            name: "  nc  \nthis is prompt text, not the session name",
+            terminalSessionID: "w0t1:NAME"
+        ))
+
+        XCTAssertEqual(store.sessions.first?.name, "nc")
+    }
+
+    @MainActor
     func testHarnessSessionEndDoesNotRemoveExplicitConnection() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let persistence = SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json"))
@@ -1147,9 +1164,14 @@ final class NoturcodeCoreTests: XCTestCase {
             .deletingLastPathComponent()
         let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
         let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
         XCTAssertTrue(surface.contains("value: surfaceHeight"))
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
+        XCTAssertTrue(coordinator.contains("return summaryAllowance"))
+        XCTAssertFalse(coordinator.contains("activityExpandedSessionID"))
+        XCTAssertFalse(coordinator.contains("toggleActivityExpansion"))
+        XCTAssertFalse(coordinator.contains("hoveredSessionID == nil ? 0 : 95"))
     }
 
     func testExpandedNotchMorphsContentInsideOnePersistentHeader() throws {
@@ -1201,6 +1223,21 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains("activity-expand-"))
         XCTAssertFalse(sessions.contains("activity-scroll-"))
         XCTAssertFalse(sessions.contains("if isHovered || isActivityExpanded"))
+    }
+
+    func testExpandedNotchSessionRowKeepsFullNameAndHidesTokenCounter() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+        let rowStart = try XCTUnwrap(source.range(of: "private struct SessionRow"))
+        let nextStart = try XCTUnwrap(source.range(of: "private struct ConversationSidebarToggle"))
+        let row = String(source[rowStart.lowerBound..<nextStart.lowerBound])
+
+        XCTAssertTrue(row.contains(".fixedSize(horizontal: true, vertical: false)"))
+        XCTAssertFalse(row.contains("if let tokens = session.tokens"))
+        XCTAssertFalse(row.contains("DurationFormatting.tokens"))
     }
 
     func testExpandedNotchShowsRotatingQuoteAndKeepsEverySessionInList() throws {

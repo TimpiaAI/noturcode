@@ -22,8 +22,7 @@ public final class SessionStore: ObservableObject {
 
         switch event.kind {
         case .connect:
-            guard let name = event.name?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !name.isEmpty,
+            guard let name = Self.normalizedSessionName(event.name),
                   let terminalSessionID = event.terminalSessionID,
                   !terminalSessionID.isEmpty else { return nil }
             let session = TrackedSession(
@@ -195,6 +194,14 @@ public final class SessionStore: ObservableObject {
 
     public var sortedSessions: [TrackedSession] {
         sessions.sorted { $0.lastPromptAt > $1.lastPromptAt }
+    }
+
+    private static func normalizedSessionName(_ rawName: String?) -> String? {
+        rawName?
+            .components(separatedBy: .newlines)
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first(where: { !$0.isEmpty })
     }
 
     private func session(at index: Int?) -> TrackedSession? {

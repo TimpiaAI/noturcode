@@ -295,14 +295,12 @@ final class NotchPresentationState: ObservableObject {
     @Published private(set) var isExpanded: Bool
     @Published private(set) var hoveredSessionID: String?
     @Published private(set) var pressedSessionID: String?
-    @Published private(set) var activityExpandedSessionID: String?
     let isUITestSpotlight: Bool
     let isUITestRapidHover: Bool
 
     private var isArmed = true
     private var pointerInside = false
     private let isUITestForcedExpanded: Bool
-    private let isUITestActivityExpanded: Bool
     private var dwellTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private var hoverIntentTask: Task<Void, Never>?
@@ -313,7 +311,6 @@ final class NotchPresentationState: ObservableObject {
         isUITestSpotlight = CommandLine.arguments.contains("--ui-test-hover-first")
             || CommandLine.arguments.contains("--ui-test-live-transcript")
         isUITestRapidHover = CommandLine.arguments.contains("--ui-test-rapid-hover")
-        isUITestActivityExpanded = CommandLine.arguments.contains("--ui-test-expanded-activity")
         isExpanded = isUITestForcedExpanded
         isArmed = !isExpanded
     }
@@ -359,9 +356,6 @@ final class NotchPresentationState: ObservableObject {
         hoverClearTask?.cancel()
         hoverClearTask = nil
         if let id {
-            if hoveredSessionID != id, isUITestActivityExpanded {
-                activityExpandedSessionID = id
-            }
             if isUITestSpotlight || hoveredSessionID == nil {
                 hoveredSessionID = id
                 return
@@ -389,10 +383,6 @@ final class NotchPresentationState: ObservableObject {
         }
     }
 
-    func toggleActivityExpansion(for sessionID: String) {
-        activityExpandedSessionID = activityExpandedSessionID == sessionID ? nil : sessionID
-    }
-
     func expand() {
         dwellTask?.cancel()
         dwellTask = nil
@@ -408,8 +398,7 @@ final class NotchPresentationState: ObservableObject {
             $0.state.showsCompletionSummary && NoturcodeSummaryContract.isDisplayable($0.lastAgentMessage)
         }.count
         let summaryAllowance = min(42, CGFloat(summaryCount) * 14)
-        if activityExpandedSessionID != nil { return summaryAllowance + 207 }
-        return summaryAllowance + (hoveredSessionID == nil ? 0 : 95)
+        return summaryAllowance
     }
 
     func select(_ session: TrackedSession, action: @escaping @MainActor () -> Void) {
@@ -444,7 +433,6 @@ final class NotchPresentationState: ObservableObject {
         hoverClearTask = nil
         isExpanded = false
         hoveredSessionID = nil
-        activityExpandedSessionID = nil
         isArmed = false
     }
 }
