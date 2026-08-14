@@ -3,28 +3,135 @@ import SwiftUI
 import NoturcodeCore
 import UniformTypeIdentifiers
 
-private final class PointingHandCursorView: NSView {
+@MainActor
+private final class PointingHandCursorCoordinator {
+    static let shared = PointingHandCursorCoordinator()
+
+    private var activeRegions: Set<UUID> = []
+    private var eventMonitor: Any?
+
+    func setActive(_ active: Bool, regionID: UUID) {
+        if active {
+            activeRegions.insert(regionID)
+            installMonitorIfNeeded()
+        } else {
+            activeRegions.remove(regionID)
+            if activeRegions.isEmpty {
+                removeMonitor()
+            }
+        }
+        scheduleCursorRefresh()
+    }
+
+    private func installMonitorIfNeeded() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.cursorUpdate, .mouseMoved, .leftMouseDragged]
+        ) { [weak self] event in
+            self?.scheduleCursorRefresh()
+            return event
+        }
+    }
+
+    private func removeMonitor() {
+        guard let eventMonitor else { return }
+        NSEvent.removeMonitor(eventMonitor)
+        self.eventMonitor = nil
+    }
+
+    private func scheduleCursorRefresh() {
+        // Local monitors run before AppKit applies the window cursor rect.
+        // Apply on the next main-loop turn so the clickable cursor wins.
+        DispatchQueue.main.async { [weak self] in
+            self?.applyCursor()
+        }
+    }
+
+    private func applyCursor() {
+        if activeRegions.isEmpty {
+            NSCursor.arrow.set()
+        } else {
+            NSCursor.pointingHand.set()
+        }
+    }
+}
+
+private final class PointingHandCursorRegionView: NSView {
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .cursorUpdate],
+            owner: self
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        NSCursor.pointingHand.set()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        window?.invalidateCursorRects(for: self)
+    }
 }
 
 private struct PointingHandCursorRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> PointingHandCursorView {
-        PointingHandCursorView(frame: .zero)
+    func makeNSView(context: Context) -> PointingHandCursorRegionView {
+        PointingHandCursorRegionView(frame: .zero)
     }
 
-    func updateNSView(_ nsView: PointingHandCursorView, context: Context) {
-        nsView.window?.invalidateCursorRects(for: nsView)
+    func updateNSView(_ nsView: PointingHandCursorRegionView, context: Context) {}
+}
+
+private struct PointingHandCursorModifier: ViewModifier {
+    @State private var regionID = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(PointingHandCursorRegion())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    PointingHandCursorCoordinator.shared.setActive(true, regionID: regionID)
+                case .ended:
+                    PointingHandCursorCoordinator.shared.setActive(false, regionID: regionID)
+                }
+            }
+            .onDisappear {
+                PointingHandCursorCoordinator.shared.setActive(false, regionID: regionID)
+            }
     }
 }
 
 extension View {
     func clickableCursor() -> some View {
-        background(PointingHandCursorRegion())
+        modifier(PointingHandCursorModifier())
     }
 }
 
@@ -111,9 +218,8 @@ struct SessionMarble: View {
             )
 
             if animatesAttention {
-                TimelineView(.animation(minimumInterval: 1 / 15)) { context in
-                    stateRing(time: context.date.timeIntervalSinceReferenceDate)
-                }
+                AskingAttentionRing(size: size, isAnimated: true)
+                    .padding(-2.5)
             } else if state == .working {
                 WorkingSpinnerRing(size: size, isAnimated: !reduceMotion)
                     .padding(-2.2)
@@ -166,176 +272,70 @@ struct SessionMarble: View {
     }
 }
 
-// Native SwiftUI port of the public thinking-orbs ribbon/ring geometry.
-// The geometry stays compatible with the MIT-licensed Canvas engine while
-// Noturcode paints every dot with the session's deterministic color pair.
-private struct ColoredThinkingOrb: View {
-    enum Motion {
-        case composing
-        case breathing
-    }
-
-    let motion: Motion
+private struct AskingAttentionRing: NSViewRepresentable {
     let size: CGFloat
-    let primaryHue: Double
-    let secondaryHue: Double
-    let saturation: Double
     let isAnimated: Bool
 
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 24, paused: !isAnimated)) { timeline in
-            Canvas(opaque: false, colorMode: .linear, rendersAsynchronously: true) { context, canvasSize in
-                let time = isAnimated ? timeline.date.timeIntervalSinceReferenceDate : 0.6
-                draw(in: &context, canvasSize: canvasSize, time: time)
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+    func makeNSView(context: Context) -> AskingAttentionRingView {
+        AskingAttentionRingView()
     }
 
-    private struct OrbDot {
-        let point: CGPoint
-        let depth: Double
-        let radius: Double
-        let ink: Double
-        let opacity: Double
+    func updateNSView(_ view: AskingAttentionRingView, context: Context) {
+        view.configure(size: size, animated: isAnimated)
     }
 
-    private func draw(in context: inout GraphicsContext, canvasSize: CGSize, time: TimeInterval) {
-        let drawingSize = Double(min(canvasSize.width, canvasSize.height))
-        guard drawingSize > 0 else { return }
-        let speed = motion == .composing ? 3.12 : 3.78
-        let t = time * speed
-        let radius = drawingSize * 0.39
-        let cameraTilt = 0.3
-        let radiusScale = pow(drawingSize / 300, 0.6)
-        let isFaceOn = motion == .breathing
-        var dots: [OrbDot] = []
+    static func dismantleNSView(_ view: AskingAttentionRingView, coordinator: ()) {
+        view.stopAnimating()
+    }
+}
 
-        if !isFaceOn {
-            let ghostCount = max(5, Int((drawingSize / 20 * 8).rounded()))
-            for index in 0..<ghostCount {
-                let direction = fibonacciDirection(index: index, count: ghostCount)
-                let projected = project(
-                    x: direction.x * radius,
-                    y: direction.y * radius,
-                    z: direction.z * radius,
-                    tilt: cameraTilt,
-                    center: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                )
-                let depth = (projected.z / radius + 1) / 2
-                dots.append(
-                    OrbDot(
-                        point: projected.point,
-                        depth: projected.z,
-                        radius: max(0.25, 0.8 * radiusScale),
-                        ink: 0.78,
-                        opacity: 0.10 + 0.22 * depth
-                    )
-                )
-            }
-        }
+private final class AskingAttentionRingView: NSView {
+    private let ringLayer = CAShapeLayer()
 
-        let angle = isFaceOn ? -cameraTilt : 0.55
-        let ux = 1.0
-        let uz = 0.0
-        let vx = -uz * sin(angle)
-        let vy = cos(angle)
-        let vz = ux * sin(angle)
-        let nx = -uz * vy
-        let ny = uz * vx - ux * vz
-        let nz = ux * vy
-        let wobbleMultiplier = isFaceOn ? 0.565 : 1.0
-        let wobbleAmplitude = 0.23 * wobbleMultiplier
-        let baseRadius = isFaceOn ? radius / (1 + 0.85 * wobbleAmplitude) : radius
-        let laneCount = isFaceOn ? 8 : 10
-        let segmentCount = max(isFaceOn ? 15 : 20, Int((drawingSize * (isFaceOn ? 0.75 : 1.0)).rounded()))
-        let baseDotRadius = (isFaceOn ? 1.1 * 1.622 : 1.1 * 1.073)
-        let depthDotRadius = (isFaceOn ? 1.7 * 1.622 : 1.7 * 1.073)
-
-        for lane in 0..<laneCount {
-            let laneOffset = (Double(lane) - Double(laneCount - 1) / 2) * 0.075
-            let edge = abs(Double(lane) - Double(laneCount - 1) / 2) / max(1, Double(laneCount - 1) / 2)
-            for segment in 0..<segmentCount {
-                let a = Double(segment) / Double(segmentCount) * 2 * .pi
-                let wobble = (
-                    0.16 * sin(a * 3 - t * 1.7 + Double(lane) * 0.22)
-                        + 0.07 * sin(a * 5 + t * 1.1)
-                ) * wobbleMultiplier
-                let radial = isFaceOn ? 1 + wobble : 1
-                let offset = isFaceOn ? laneOffset : laneOffset + wobble
-                let x = ux * cos(a) + vx * sin(a) + nx * offset
-                let y = vy * sin(a) + ny * offset
-                let z = uz * cos(a) + vz * sin(a) + nz * offset
-                let length = sqrt(x * x + y * y + z * z)
-                let scaledRadius = baseRadius * radial
-                let projected = project(
-                    x: x / length * scaledRadius,
-                    y: y / length * scaledRadius,
-                    z: z / length * scaledRadius,
-                    tilt: cameraTilt,
-                    center: CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
-                )
-                let depth = (projected.z / radius + 1) / 2
-                let dotRadius = (baseDotRadius + depthDotRadius * depth) * (1 - 0.25 * edge) * radiusScale
-                dots.append(
-                    OrbDot(
-                        point: projected.point,
-                        depth: projected.z,
-                        radius: max(0.25, dotRadius),
-                        ink: 0.52 - 0.44 * depth + 0.18 * edge,
-                        opacity: 0.40 + 0.60 * depth
-                    )
-                )
-            }
-        }
-        for dot in dots.sorted(by: { $0.depth < $1.depth }) {
-            let rect = CGRect(
-                x: dot.point.x - CGFloat(dot.radius),
-                y: dot.point.y - CGFloat(dot.radius),
-                width: CGFloat(dot.radius * 2),
-                height: CGFloat(dot.radius * 2)
-            )
-            context.fill(Path(ellipseIn: rect), with: .color(color(ink: dot.ink, opacity: dot.opacity)))
-        }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        ringLayer.fillColor = NSColor.clear.cgColor
+        ringLayer.strokeColor = NSColor.white.withAlphaComponent(0.95).cgColor
+        layer?.addSublayer(ringLayer)
     }
 
-    private func color(ink: Double, opacity: Double) -> Color {
-        let depth = min(1, max(0, 1 - ink))
-        var hueDelta = primaryHue - secondaryHue
-        if hueDelta > 0.5 { hueDelta -= 1 }
-        if hueDelta < -0.5 { hueDelta += 1 }
-        var hue = secondaryHue + hueDelta * depth
-        if hue < 0 { hue += 1 }
-        if hue >= 1 { hue -= 1 }
-        return Color(
-            hue: hue,
-            saturation: saturation * (0.78 + 0.22 * depth),
-            brightness: 0.70 + 0.30 * depth,
-            opacity: opacity
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let lineWidth = ringLayer.lineWidth
+        ringLayer.frame = bounds
+        ringLayer.path = CGPath(
+            ellipseIn: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+            transform: nil
         )
     }
 
-    private func fibonacciDirection(index: Int, count: Int) -> (x: Double, y: Double, z: Double) {
-        let y = 1 - (Double(index) + 0.5) / Double(count) * 2
-        let radial = sqrt(max(0, 1 - y * y))
-        let angle = Double(index) * .pi * (3 - sqrt(5))
-        return (cos(angle) * radial, y, sin(angle) * radial)
+    func configure(size: CGFloat, animated: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ringLayer.lineWidth = max(1.3, size * 0.09)
+        CATransaction.commit()
+        needsLayout = true
+        animated ? startAnimating() : stopAnimating()
     }
 
-    private func project(
-        x: Double,
-        y: Double,
-        z: Double,
-        tilt: Double,
-        center: CGPoint
-    ) -> (point: CGPoint, z: Double) {
-        let projectedY = y * cos(tilt) - z * sin(tilt)
-        let projectedZ = y * sin(tilt) + z * cos(tilt)
-        return (
-            CGPoint(x: center.x + x, y: center.y - projectedY),
-            projectedZ
-        )
+    private func startAnimating() {
+        guard ringLayer.animation(forKey: "noturcode.asking-pulse") == nil else { return }
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.fromValue = 0.42
+        pulse.toValue = 0.97
+        pulse.duration = 0.66
+        pulse.autoreverses = true
+        pulse.repeatCount = .infinity
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        ringLayer.add(pulse, forKey: "noturcode.asking-pulse")
+    }
+
+    func stopAnimating() {
+        ringLayer.removeAnimation(forKey: "noturcode.asking-pulse")
+        ringLayer.opacity = 0.95
     }
 }
 
@@ -909,7 +909,8 @@ private struct ConversationControlButtonStyle: ButtonStyle {
 struct TerminalViewportContent: View {
     let session: TrackedSession
     let reader: AgentTranscriptReader
-    let sender: ITermPromptSender
+    let sender: SessionPromptRouter
+    let nativeSessions: NativeSessionCoordinator
     let onPreviewFile: (URL) -> Void
     let onClose: (() -> Void)?
     let presentation: TerminalViewportPresentation
@@ -930,6 +931,8 @@ struct TerminalViewportContent: View {
     @State private var isSidebarVisible = true
     @State private var deliveryResetGeneration = 0
     @State private var composerHeight: CGFloat = 22
+    @State private var nativeApprovals: [NativeSessionCoordinator.PendingApproval] = []
+    @State private var nativeApprovalError: String?
 
     private var visibleTranscriptEntries: [ChatTranscriptEntry] {
         let merged = transcriptEntries + optimisticEntries.filter { optimistic in
@@ -977,7 +980,8 @@ struct TerminalViewportContent: View {
     init(
         session: TrackedSession,
         reader: AgentTranscriptReader,
-        sender: ITermPromptSender,
+        sender: SessionPromptRouter,
+        nativeSessions: NativeSessionCoordinator,
         onPreviewFile: @escaping (URL) -> Void = { _ in },
         onClose: (() -> Void)? = nil,
         presentation: TerminalViewportPresentation = .floating
@@ -985,6 +989,7 @@ struct TerminalViewportContent: View {
         self.session = session
         self.reader = reader
         self.sender = sender
+        self.nativeSessions = nativeSessions
         self.onPreviewFile = onPreviewFile
         self.onClose = onClose
         self.presentation = presentation
@@ -1014,7 +1019,10 @@ struct TerminalViewportContent: View {
     }
 
     private var sessionLabel: String {
-        let id = session.terminal.uniqueID
+        guard let terminal = session.terminal else {
+            return session.nativeSession.map { "Native session · \($0.transport.rawValue)" } ?? "Native session"
+        }
+        let id = terminal.uniqueID
         guard id.count > 8 else { return "Local session · \(id)" }
         return "Local session · …\(id.suffix(8))"
     }
@@ -1306,6 +1314,14 @@ struct TerminalViewportContent: View {
             .animation(reduceMotion ? nil : .smooth(duration: 0.20), value: isSidebarVisible)
 
             if selectedSubagent == nil {
+                if let approval = nativeApprovals.first {
+                    NativeApprovalCard(
+                        approval: approval,
+                        errorMessage: nativeApprovalError,
+                        onRespond: respondToNativeApproval
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 composerSurface
             } else {
                 Button {
@@ -1342,18 +1358,26 @@ struct TerminalViewportContent: View {
             while !Task.isCancelled {
                 switch await reader.snapshot(session) {
                 case let .found(entries):
-                    if !entries.isEmpty || transcriptEntries.isEmpty {
+                    if entries != transcriptEntries,
+                       !entries.isEmpty || transcriptEntries.isEmpty {
                         transcriptEntries = entries
                     }
-                    transcriptMessage = visibleTranscriptEntries.isEmpty
+                    optimisticEntries.removeAll { optimistic in
+                        entries.contains { entry in
+                            entry.kind == .user && entry.text == optimistic.text
+                        }
+                    }
+                    let nextMessage = visibleTranscriptEntries.isEmpty
                         ? "No messages have been written to the local transcript yet."
                         : ""
+                    if transcriptMessage != nextMessage { transcriptMessage = nextMessage }
                 case .missing:
                     if transcriptEntries.isEmpty {
-                        transcriptMessage = "The local \(session.key.source.displayName) transcript has not been reported yet."
+                        let nextMessage = "The local \(session.key.source.displayName) transcript has not been reported yet."
+                        if transcriptMessage != nextMessage { transcriptMessage = nextMessage }
                     }
                 case let .failed(message):
-                    if transcriptEntries.isEmpty {
+                    if transcriptEntries.isEmpty, transcriptMessage != message {
                         transcriptMessage = message
                     }
                 }
@@ -1375,19 +1399,47 @@ struct TerminalViewportContent: View {
             while !Task.isCancelled {
                 switch await reader.snapshot(session, subagentID: subagentID) {
                 case let .found(entries):
-                    if !entries.isEmpty || selectedAgentConversationEntries.isEmpty {
+                    if entries != selectedAgentConversationEntries,
+                       !entries.isEmpty || selectedAgentConversationEntries.isEmpty {
                         selectedAgentConversationEntries = entries
                     }
-                    selectedAgentConversationMessage = entries.isEmpty
+                    let nextMessage = entries.isEmpty
                         ? "This agent has not written to its local transcript yet."
                         : ""
+                    if selectedAgentConversationMessage != nextMessage {
+                        selectedAgentConversationMessage = nextMessage
+                    }
                 case .missing:
-                    selectedAgentConversationMessage = "No separate transcript was reported for this agent."
+                    let nextMessage = "No separate transcript was reported for this agent."
+                    if selectedAgentConversationMessage != nextMessage {
+                        selectedAgentConversationMessage = nextMessage
+                    }
                 case let .failed(message):
-                    selectedAgentConversationMessage = message
+                    if selectedAgentConversationMessage != message {
+                        selectedAgentConversationMessage = message
+                    }
                 }
                 do {
                     try await Task.sleep(for: .milliseconds(220))
+                } catch {
+                    return
+                }
+            }
+        }
+        .task(id: "\(session.key.description)|\(session.state.rawValue)") {
+            guard session.state == .askingYou else {
+                nativeApprovals = []
+                nativeApprovalError = nil
+                return
+            }
+            while !Task.isCancelled {
+                let next = await nativeSessions.approvals(for: session.key)
+                if next != nativeApprovals {
+                    nativeApprovals = next
+                    if next.isEmpty { nativeApprovalError = nil }
+                }
+                do {
+                    try await Task.sleep(for: .milliseconds(160))
                 } catch {
                     return
                 }
@@ -1684,6 +1736,32 @@ struct TerminalViewportContent: View {
     }
 
     private var promptComposer: some View {
+        IsolatedPromptComposer(
+            session: session,
+            sender: sender,
+            onOptimisticAdd: { optimisticEntries.append($0) },
+            onOptimisticRemove: { payload in
+                optimisticEntries.removeAll { $0.text == payload }
+            }
+        )
+    }
+
+    private func respondToNativeApproval(
+        _ approval: NativeSessionCoordinator.PendingApproval,
+        _ response: NativeSessionCoordinator.ApprovalResponse
+    ) {
+        nativeApprovalError = nil
+        Task {
+            do {
+                try await nativeSessions.respond(to: approval, with: response)
+                nativeApprovals = await nativeSessions.approvals(for: session.key)
+            } catch {
+                nativeApprovalError = error.localizedDescription
+            }
+        }
+    }
+
+    private var legacyPromptComposer: some View {
         VStack(alignment: .leading, spacing: 4) {
             if !attachments.isEmpty {
                 ScrollView(.horizontal) {
@@ -1784,7 +1862,8 @@ struct TerminalViewportContent: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        delivery != .sending
+            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
     }
 
     private func chooseImages() {
@@ -1843,6 +1922,7 @@ struct TerminalViewportContent: View {
 
     private func sendPrompt() {
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imagePaths = attachments.map(\.url.path)
         let references = attachments.map { "- \($0.url.path)" }.joined(separator: "\n")
         let payload = references.isEmpty
             ? message
@@ -1850,17 +1930,33 @@ struct TerminalViewportContent: View {
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n\n")
         guard !payload.isEmpty else { return }
-        switch sender.send(payload, to: session.terminal, sourceProcessID: session.sourceProcessID) {
-        case .sent:
-            NoturcodeSoundPlayer.shared.play(.send)
-            draft = ""
-            attachments.removeAll()
-            delivery = .sent
-            scheduleDeliveryReset()
-        case .missing:
-            delivery = .error("Session is no longer open")
-        case let .failed(message):
-            delivery = .error(message)
+        let originalDraft = draft
+        let originalAttachments = attachments
+        optimisticEntries.append(ChatTranscriptEntry(
+            id: "optimistic-\(UUID().uuidString)",
+            kind: .user,
+            text: payload
+        ))
+        draft = ""
+        attachments.removeAll()
+        delivery = .sending
+        Task {
+            switch await sender.send(payload, imagePaths: imagePaths, to: session) {
+            case .sent:
+                NoturcodeSoundPlayer.shared.play(.send)
+                delivery = .sent
+                scheduleDeliveryReset()
+            case .missing:
+                optimisticEntries.removeAll { $0.text == payload }
+                if draft.isEmpty { draft = originalDraft }
+                if attachments.isEmpty { attachments = originalAttachments }
+                delivery = .error("Session is no longer open")
+            case let .failed(message):
+                optimisticEntries.removeAll { $0.text == payload }
+                if draft.isEmpty { draft = originalDraft }
+                if attachments.isEmpty { attachments = originalAttachments }
+                delivery = .error(message)
+            }
         }
     }
 
@@ -1881,13 +1977,16 @@ struct TerminalViewportContent: View {
     }
 
     private func compactSession() {
-        switch sender.send("/compact", to: session.terminal, sourceProcessID: session.sourceProcessID) {
-        case .sent:
-            delivery = .compacting
-        case .missing:
-            delivery = .error("Session is no longer open")
-        case let .failed(message):
-            delivery = .error(message)
+        delivery = .sending
+        Task {
+            switch await sender.compact(session) {
+            case .sent:
+                delivery = .compacting
+            case .missing:
+                delivery = .error("Session is no longer open")
+            case let .failed(message):
+                delivery = .error(message)
+            }
         }
     }
 }
@@ -2491,7 +2590,7 @@ private struct ConversationMarkdownView: View {
     let source: String
 
     private var blocks: [ConversationMarkupBlock] {
-        ConversationMarkupParser.parse(source)
+        ConversationRenderCache.shared.blocks(for: source)
     }
 
     var body: some View {
@@ -2524,10 +2623,7 @@ private struct ConversationMarkdownView: View {
     }
 
     private func renderedMarkdown(_ text: String) -> AttributedString {
-        (try? AttributedString(
-            markdown: text,
-            options: .init(interpretedSyntax: .full)
-        )) ?? AttributedString(text)
+        ConversationRenderCache.shared.markdown(for: text)
     }
 
     private func sourceBlock(_ content: String, language: String?) -> some View {
@@ -2583,6 +2679,40 @@ private struct ConversationMarkdownView: View {
     }
 }
 
+@MainActor
+private final class ConversationRenderCache {
+    static let shared = ConversationRenderCache()
+
+    private var parsedBlocks: [String: [ConversationMarkupBlock]] = [:]
+    private var renderedMarkdown: [String: AttributedString] = [:]
+    private let limit = 160
+
+    func blocks(for source: String) -> [ConversationMarkupBlock] {
+        if let cached = parsedBlocks[source] { return cached }
+        let value = ConversationMarkupParser.parse(source)
+        trimIfNeeded(&parsedBlocks)
+        parsedBlocks[source] = value
+        return value
+    }
+
+    func markdown(for source: String) -> AttributedString {
+        if let cached = renderedMarkdown[source] { return cached }
+        let value = (try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        )) ?? AttributedString(source)
+        trimIfNeeded(&renderedMarkdown)
+        renderedMarkdown[source] = value
+        return value
+    }
+
+    private func trimIfNeeded<Value>(_ values: inout [String: Value]) {
+        guard values.count >= limit else { return }
+        let keysToRemove = Array(values.keys.prefix(limit / 2))
+        for key in keysToRemove { values[key] = nil }
+    }
+}
+
 private enum LocalFileReferenceDetector {
     static func urls(in text: String, cwd: String?) -> [URL] {
         let trimming = CharacterSet(charactersIn: "\"'`:,;()[]{}<>")
@@ -2618,8 +2748,7 @@ private enum LocalFileReferenceDetector {
 private struct ChatImagePreview: View {
     let path: String
     @State private var isHovered = false
-
-    private var image: NSImage? { NSImage(contentsOfFile: path) }
+    @State private var image: NSImage?
 
     var body: some View {
         Group {
@@ -2664,6 +2793,12 @@ private struct ChatImagePreview: View {
         .help(URL(fileURLWithPath: path).lastPathComponent)
         .accessibilityLabel("Preview \(URL(fileURLWithPath: path).lastPathComponent)")
         .accessibilityIdentifier("chat-image-preview")
+        .task(id: path) {
+            let imageData = await Task.detached(priority: .utility) {
+                try? Data(contentsOf: URL(fileURLWithPath: path), options: [.mappedIfSafe])
+            }.value
+            image = imageData.flatMap(NSImage.init(data:))
+        }
     }
 }
 
@@ -2802,6 +2937,384 @@ private final class ImagePasteTextView: NSTextView {
     }
 }
 
+private struct NativeApprovalCard: View {
+    let approval: NativeSessionCoordinator.PendingApproval
+    let errorMessage: String?
+    let onRespond: (
+        NativeSessionCoordinator.PendingApproval,
+        NativeSessionCoordinator.ApprovalResponse
+    ) -> Void
+
+    @State private var answers: [String: String] = [:]
+
+    private var questions: [NativeSessionCoordinator.ApprovalQuestion] {
+        guard case let .codexUserInput(questions) = approval.kind else { return [] }
+        return questions
+    }
+
+    private var canSubmitAnswers: Bool {
+        !questions.isEmpty && questions.allSatisfy {
+            !(answers[$0.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "hand.raised.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                Text(approval.title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                Text(approval.sessionKey.source.displayName)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+
+            if let detail = approval.detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.58))
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+            }
+
+            if questions.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(approval.options) { option in
+                        Button(option.label) {
+                            onRespond(approval, .option(option.id))
+                        }
+                        .buttonStyle(.plain)
+                        .clickableCursor()
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .foregroundStyle(option.isDestructive ? .white.opacity(0.56) : .black.opacity(0.84))
+                        .padding(.horizontal, 10)
+                        .frame(height: 25)
+                        .background(
+                            option.isDestructive ? .white.opacity(0.055) : .white.opacity(0.88),
+                            in: Capsule()
+                        )
+                        .accessibilityIdentifier(accessibilityID(for: option))
+                    }
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 9) {
+                    ForEach(questions) { question in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(question.prompt)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.74))
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            if !question.options.isEmpty {
+                                HStack(spacing: 5) {
+                                    ForEach(question.options, id: \.self) { option in
+                                        Button(option) { answers[question.id] = option }
+                                            .buttonStyle(.plain)
+                                            .clickableCursor()
+                                            .font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(.white.opacity(0.76))
+                                            .padding(.horizontal, 8)
+                                            .frame(height: 23)
+                                            .background(
+                                                answers[question.id] == option
+                                                    ? .white.opacity(0.14)
+                                                    : .white.opacity(0.05),
+                                                in: Capsule()
+                                            )
+                                    }
+                                }
+                            }
+
+                            if question.options.isEmpty || question.allowsOther {
+                                Group {
+                                    if question.isSecret {
+                                        SecureField("Answer", text: answerBinding(for: question.id))
+                                    } else {
+                                        TextField("Answer", text: answerBinding(for: question.id))
+                                    }
+                                }
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.86))
+                                .padding(.horizontal, 8)
+                                .frame(height: 26)
+                                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
+                            }
+                        }
+                    }
+
+                    Button("Send answer") {
+                        let values = answers.mapValues { [$0.trimmingCharacters(in: .whitespacesAndNewlines)] }
+                        onRespond(approval, .answers(values))
+                    }
+                    .buttonStyle(.plain)
+                    .clickableCursor()
+                    .disabled(!canSubmitAnswers)
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .foregroundStyle(canSubmitAnswers ? .black.opacity(0.84) : .white.opacity(0.26))
+                    .padding(.horizontal, 10)
+                    .frame(height: 25)
+                    .background(canSubmitAnswers ? .white.opacity(0.88) : .white.opacity(0.05), in: Capsule())
+                    .accessibilityIdentifier("native-approval-send-answer")
+                }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 8.5, weight: .medium))
+                    .foregroundStyle(.red.opacity(0.78))
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 0.7)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("native-approval-card")
+    }
+
+    private func answerBinding(for id: String) -> Binding<String> {
+        Binding(
+            get: { answers[id] ?? "" },
+            set: { answers[id] = $0 }
+        )
+    }
+
+    private func accessibilityID(for option: NativeSessionCoordinator.ApprovalOption) -> String {
+        switch option.id {
+        case "accept", "once": "native-approval-approve-once"
+        case "acceptForSession", "always": "native-approval-approve-session"
+        case "decline", "reject", "cancel": "native-approval-reject"
+        default: "native-approval-option-\(option.id)"
+        }
+    }
+}
+
+private struct IsolatedPromptComposer: View {
+    let session: TrackedSession
+    let sender: SessionPromptRouter
+    let onOptimisticAdd: (ChatTranscriptEntry) -> Void
+    let onOptimisticRemove: (String) -> Void
+
+    @State private var draft = ""
+    @State private var attachments: [PromptImageAttachment] = []
+    @State private var delivery: PromptDeliveryState = .idle
+    @State private var composerHeight: CGFloat = 22
+    @State private var deliveryResetGeneration = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if !attachments.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(attachments) { attachment in
+                            ZStack(alignment: .topTrailing) {
+                                Image(nsImage: attachment.image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 46, height: 30)
+                                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                            .stroke(.white.opacity(0.13), lineWidth: 0.7)
+                                    }
+                                    .accessibilityIdentifier("prompt-image-attachment")
+                                Button {
+                                    attachments.removeAll { $0.id == attachment.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .black.opacity(0.72))
+                                }
+                                .buttonStyle(.plain)
+                                .clickableCursor()
+                                .offset(x: 4, y: -4)
+                                .accessibilityLabel("Remove \(attachment.url.lastPathComponent)")
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: 34)
+            }
+
+            HStack(alignment: .bottom, spacing: 3) {
+                Button(action: chooseImages) {
+                    Image(systemName: "paperclip")
+                        .frame(width: 20, height: 20)
+                }
+                .help("Attach reference images")
+                .accessibilityLabel("Attach reference images")
+                .accessibilityIdentifier("attach-images")
+
+                PasteAwarePromptEditor(
+                    text: $draft,
+                    height: $composerHeight,
+                    placeholder: "Message \(session.name)…",
+                    onSubmit: sendPrompt,
+                    onPasteImage: pasteImages
+                )
+                .frame(height: composerHeight)
+                .padding(.horizontal, 5)
+                .accessibilityLabel("Prompt for \(session.name)")
+                .accessibilityIdentifier("prompt-composer")
+
+                Button(action: sendPrompt) {
+                    Image(systemName: delivery == .sent ? "checkmark" : "arrow.up")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(canSend ? Color.black.opacity(0.82) : .white.opacity(0.24))
+                        .frame(width: 24, height: 24)
+                        .background(canSend ? Color.white.opacity(0.92) : .white.opacity(0.07), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .clickableCursor()
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(!canSend)
+                .help("Send to this session (Return or ⌘↩)")
+                .accessibilityLabel("Send prompt to \(session.name)")
+                .accessibilityIdentifier("send-prompt")
+            }
+            .buttonStyle(.plain)
+            .clickableCursor()
+            .foregroundStyle(.white.opacity(0.46))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .frame(minHeight: 30)
+            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(.white.opacity(0.08), lineWidth: 0.7)
+            }
+
+            if delivery != .idle {
+                HStack(spacing: 5) {
+                    Image(systemName: delivery.icon)
+                    Text(delivery.message).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(.white.opacity(delivery.isError ? 0.72 : 0.38))
+                .padding(.leading, 29)
+                .accessibilityIdentifier("composer-system-status")
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var canSend: Bool {
+        delivery != .sending
+            && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty)
+    }
+
+    private func chooseImages() {
+        let panel = NSOpenPanel()
+        panel.title = "Attach reference images"
+        panel.prompt = "Attach"
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        if panel.runModal() == .OK { addImageURLs(panel.urls) }
+    }
+
+    @discardableResult
+    private func pasteImages() -> Bool {
+        let pasteboard = NSPasteboard.general
+        var images = pasteboard.readObjects(forClasses: [NSImage.self]) as? [NSImage] ?? []
+        if images.isEmpty {
+            let imageTypes: [NSPasteboard.PasteboardType] = [
+                .png, .tiff, .init("public.jpeg"), .init("public.heic")
+            ]
+            for item in pasteboard.pasteboardItems ?? [] {
+                if let data = imageTypes.lazy.compactMap({ item.data(forType: $0) }).first,
+                   let image = NSImage(data: data) {
+                    images.append(image)
+                }
+                if let urlString = item.string(forType: .fileURL),
+                   let url = URL(string: urlString),
+                   let image = NSImage(contentsOf: url) {
+                    images.append(image)
+                }
+            }
+        }
+        guard !images.isEmpty else { return false }
+        for image in images.prefix(max(0, 8 - attachments.count)) {
+            guard let url = PromptAttachmentStorage.persist(image: image) else { continue }
+            attachments.append(PromptImageAttachment(url: url, image: image))
+        }
+        delivery = .idle
+        return true
+    }
+
+    private func addImageURLs(_ urls: [URL]) {
+        for url in urls.prefix(max(0, 8 - attachments.count)) {
+            guard let image = NSImage(contentsOf: url) else { continue }
+            attachments.append(PromptImageAttachment(url: url, image: image))
+        }
+        delivery = .idle
+    }
+
+    private func sendPrompt() {
+        let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let imagePaths = attachments.map(\.url.path)
+        let references = attachments.map { "- \($0.url.path)" }.joined(separator: "\n")
+        let payload = references.isEmpty
+            ? message
+            : [message, "Reference images available at these local paths:\n\(references)"]
+                .filter { !$0.isEmpty }
+                .joined(separator: "\n\n")
+        guard !payload.isEmpty else { return }
+        let originalDraft = draft
+        let originalAttachments = attachments
+        onOptimisticAdd(ChatTranscriptEntry(
+            id: "optimistic-\(UUID().uuidString)",
+            kind: .user,
+            text: payload
+        ))
+        draft = ""
+        attachments.removeAll()
+        delivery = .sending
+        Task {
+            switch await sender.send(payload, imagePaths: imagePaths, to: session) {
+            case .sent:
+                NoturcodeSoundPlayer.shared.play(.send)
+                delivery = .sent
+                scheduleDeliveryReset()
+            case .missing:
+                restore(payload: payload, draft: originalDraft, attachments: originalAttachments)
+                delivery = .error("Session is no longer open")
+            case let .failed(message):
+                restore(payload: payload, draft: originalDraft, attachments: originalAttachments)
+                delivery = .error(message)
+            }
+        }
+    }
+
+    private func restore(payload: String, draft originalDraft: String, attachments originalAttachments: [PromptImageAttachment]) {
+        onOptimisticRemove(payload)
+        if draft.isEmpty { draft = originalDraft }
+        if attachments.isEmpty { attachments = originalAttachments }
+    }
+
+    private func scheduleDeliveryReset() {
+        deliveryResetGeneration &+= 1
+        let generation = deliveryResetGeneration
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1.25))
+            guard deliveryResetGeneration == generation, delivery == .sent else { return }
+            withAnimation(.easeOut(duration: 0.12)) { delivery = .idle }
+        }
+    }
+}
+
 private struct PromptImageAttachment: Identifiable {
     let id = UUID()
     let url: URL
@@ -2810,6 +3323,7 @@ private struct PromptImageAttachment: Identifiable {
 
 private enum PromptDeliveryState: Equatable {
     case idle
+    case sending
     case sent
     case compacting
     case error(String)
@@ -2817,6 +3331,7 @@ private enum PromptDeliveryState: Equatable {
     var icon: String {
         switch self {
         case .idle: "lock.shield"
+        case .sending: "arrow.up.circle"
         case .sent: "checkmark.circle.fill"
         case .compacting: "arrow.down.right.and.arrow.up.left.circle.fill"
         case .error: "exclamationmark.circle.fill"
@@ -2826,6 +3341,7 @@ private enum PromptDeliveryState: Equatable {
     var message: String {
         switch self {
         case .idle: "Local only"
+        case .sending: "Sending"
         case .sent: "Sent"
         case .compacting: "Compaction requested"
         case let .error(message): message

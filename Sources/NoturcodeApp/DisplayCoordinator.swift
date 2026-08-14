@@ -4,6 +4,39 @@ import Foundation
 import NoturcodeCore
 import SwiftUI
 
+private final class MouseLocationCoalescer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var latest: CGPoint?
+    private var isScheduled = false
+    private let deliver: @MainActor (CGPoint) -> Void
+
+    init(deliver: @escaping @MainActor (CGPoint) -> Void) {
+        self.deliver = deliver
+    }
+
+    func submit(_ location: CGPoint) {
+        lock.lock()
+        latest = location
+        let shouldSchedule = !isScheduled
+        if shouldSchedule { isScheduled = true }
+        lock.unlock()
+        guard shouldSchedule else { return }
+        Task { @MainActor [weak self] in
+            guard let self, let location = self.takeLatest() else { return }
+            self.deliver(location)
+        }
+    }
+
+    private func takeLatest() -> CGPoint? {
+        lock.lock()
+        defer { lock.unlock() }
+        let location = latest
+        latest = nil
+        isScheduled = false
+        return location
+    }
+}
+
 struct NotchMetrics: Equatable, Sendable {
     let displayID: UInt32
     let screenFrame: CGRect
@@ -32,7 +65,8 @@ struct NotchMetrics: Equatable, Sendable {
 
     init(screen: NSScreen) {
         let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-        displayID = screenNumber?.uint32Value ?? UInt32(abs(screen.localizedName.hashValue))
+        displayID = screenNumber?.uint32Value
+            ?? UInt32(truncatingIfNeeded: ObjectIdentifier(screen).hashValue)
         screenFrame = screen.frame
         envelopeWidth = min(540, max(360, screen.frame.width))
         envelopeHeight = min(570, max(300, screen.frame.height))
@@ -51,7 +85,7 @@ struct NotchMetrics: Equatable, Sendable {
     }
 
     func sessionChipWidth(for name: String) -> CGFloat {
-        min(96, max(50, ceil(CGFloat(name.count) * 5.7) + 34))
+        min(108, max(62, ceil(CGFloat(name.count) * 5.7) + 46))
     }
 
     func collapsedWidth(sessionNames: [String]) -> CGFloat {
@@ -70,6 +104,15 @@ struct NotchMetrics: Equatable, Sendable {
         return min(520, max(180, topInset + CGFloat(sessionCount) * 92 + 12))
     }
 
+    func expandedSurfaceHeight(sessionCount: Int, activityAdjustment: CGFloat) -> CGFloat {
+        min(
+            520,
+            expandedHeight(sessionCount: sessionCount)
+                + dockRailHeight(sessionCount: sessionCount)
+                + activityAdjustment
+        )
+    }
+
 }
 
 @MainActor
@@ -81,6 +124,7 @@ final class DisplayCoordinator {
     private var screenObserver: NSObjectProtocol?
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var mouseCoalescer: MouseLocationCoalescer?
 
     init(model: AppModel) {
         self.model = model
@@ -111,12 +155,16 @@ final class DisplayCoordinator {
         ) { [weak self] _ in
             Task { @MainActor in self?.refreshScreens() }
         }
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] event in
-            Task { @MainActor in self?.handleMouse(at: NSEvent.mouseLocation) }
+        let mouseCoalescer = MouseLocationCoalescer { [weak self] location in
+            self?.handleMouse(at: location)
+        }
+        self.mouseCoalescer = mouseCoalescer
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { event in
+            mouseCoalescer.submit(NSEvent.mouseLocation)
             return event
         }
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { [weak self] _ in
-            Task { @MainActor in self?.handleMouse(at: NSEvent.mouseLocation) }
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { _ in
+            mouseCoalescer.submit(NSEvent.mouseLocation)
         }
         handleMouse(at: NSEvent.mouseLocation)
     }
@@ -128,6 +176,7 @@ final class DisplayCoordinator {
         localMouseMonitor = nil
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         globalMouseMonitor = nil
+        mouseCoalescer = nil
         announcementCancellable?.cancel()
         announcementCancellable = nil
         announcementPanel?.close()
@@ -147,10 +196,13 @@ final class DisplayCoordinator {
 
     private func refreshScreens() {
         guard let model else { return }
-        let current = Dictionary(uniqueKeysWithValues: NSScreen.screens.map { screen in
+        var current: [UInt32: (NSScreen, NotchMetrics)] = [:]
+        for screen in NSScreen.screens {
             let metrics = NotchMetrics(screen: screen)
-            return (metrics.displayID, (screen, metrics))
-        })
+            var displayID = metrics.displayID
+            while current[displayID] != nil { displayID &+= 1 }
+            current[displayID] = (screen, metrics)
+        }
 
         for (displayID, controller) in panels where current[displayID] == nil {
             controller.close()
@@ -405,18 +457,18 @@ final class NotchPresentationState: ObservableObject {
         pressedSessionID = session.id
         dwellTask?.cancel()
         exitTask?.cancel()
+        collapseAndLatch()
+        // UI fixtures must never activate or manipulate a real terminal window.
+        if !isUITestForcedExpanded {
+            action()
+        }
         Task { [weak self] in
             do {
-                try await Task.sleep(for: .milliseconds(230))
+                try await Task.sleep(for: .milliseconds(80))
             } catch {
                 return
             }
-            self?.collapseAndLatch()
             self?.pressedSessionID = nil
-            // UI fixtures must never activate or manipulate a real iTerm2 window.
-            if self?.isUITestForcedExpanded != true {
-                action()
-            }
         }
     }
 
@@ -485,7 +537,8 @@ final class NotchPanelController {
     }
 
     func refresh() {
-        hostingView.rootView = NotchSurfaceView(model: model, state: state, metrics: metrics)
+        // The root already observes AppModel and NotchPresentationState. Replacing
+        // it for every hook event destroys SwiftUI identity and restarts motion.
         panel.orderFrontRegardless()
     }
 
@@ -495,10 +548,9 @@ final class NotchPanelController {
         let height: CGFloat
         if state.isExpanded {
             width = min(420, metrics.envelopeWidth - 16)
-            height = min(
-                520,
-                metrics.expandedHeight(sessionCount: sessionCount)
-                    + state.activityHeightAdjustment(in: model.store.sessions)
+            height = metrics.expandedSurfaceHeight(
+                sessionCount: sessionCount,
+                activityAdjustment: state.activityHeightAdjustment(in: model.store.sessions)
             )
         } else if hasAnnouncement {
             width = min(286, metrics.envelopeWidth - 16)
@@ -517,7 +569,12 @@ final class NotchPanelController {
     }
 
     func pointerMoved(inside: Bool) {
-        panel.ignoresMouseEvents = state.isUITestSpotlight ? false : !inside
+        let ignoresMouseEvents = state.isUITestSpotlight ? false : !inside
+        let interactionChanged = panel.ignoresMouseEvents != ignoresMouseEvents
+        panel.ignoresMouseEvents = ignoresMouseEvents
+        if interactionChanged, !ignoresMouseEvents, let contentView = panel.contentView {
+            panel.invalidateCursorRects(for: contentView)
+        }
         state.pointerMoved(inside: inside)
     }
 

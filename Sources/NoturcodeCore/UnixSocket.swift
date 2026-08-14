@@ -58,6 +58,22 @@ private func withSockAddr<R>(_ address: inout sockaddr_un, _ body: (UnsafePointe
     }
 }
 
+private func writeAll(_ descriptor: Int32, data: Data) throws {
+    try data.withUnsafeBytes { bytes in
+        guard let base = bytes.baseAddress else { return }
+        var offset = 0
+        while offset < data.count {
+            let count = Darwin.write(descriptor, base.advanced(by: offset), data.count - offset)
+            if count > 0 {
+                offset += count
+                continue
+            }
+            if count < 0 && errno == EINTR { continue }
+            throw UnixSocketError.write(errno)
+        }
+    }
+}
+
 private func socketPathStatus(_ path: String) throws -> stat? {
     var status = stat()
     if lstat(path, &status) == 0 {
@@ -75,6 +91,7 @@ public final class UnixSocketServer: @unchecked Sendable {
 
     private let path: String
     private let queue: DispatchQueue
+    private let clientQueue: DispatchQueue
     private let handler: Handler
     private var fileDescriptor: Int32 = -1
     private var source: DispatchSourceRead?
@@ -84,6 +101,11 @@ public final class UnixSocketServer: @unchecked Sendable {
         self.path = path
         self.handler = handler
         self.queue = DispatchQueue(label: "ro.noturcode.socket", qos: .userInitiated)
+        self.clientQueue = DispatchQueue(
+            label: "ro.noturcode.socket.clients",
+            qos: .userInitiated,
+            attributes: .concurrent
+        )
     }
 
     deinit { stop() }
@@ -151,7 +173,10 @@ public final class UnixSocketServer: @unchecked Sendable {
             }
             var noSigPipe: Int32 = 1
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
-            queue.async { [handler] in
+            var timeout = timeval(tv_sec: 2, tv_usec: 0)
+            setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            setsockopt(client, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            clientQueue.async { [handler] in
                 var input = Data()
                 var buffer = [UInt8](repeating: 0, count: 16_384)
                 while input.count < 2_000_000 {
@@ -163,11 +188,7 @@ public final class UnixSocketServer: @unchecked Sendable {
                     }
                 }
                 let response = handler(input)
-                response.withUnsafeBytes { bytes in
-                    if let base = bytes.baseAddress, !response.isEmpty {
-                        _ = Darwin.write(client, base, response.count)
-                    }
-                }
+                try? writeAll(client, data: response)
                 Darwin.shutdown(client, SHUT_RDWR)
                 Darwin.close(client)
             }
@@ -187,15 +208,12 @@ public enum UnixSocketClient {
 
         var timeout = timeval(tv_sec: 2, tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var address = try socketAddress(path: path)
         let result = withSockAddr(&address) { Darwin.connect(descriptor, $0, $1) }
         guard result == 0 else { throw UnixSocketError.connect(errno) }
 
-        let written: Int = data.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { return 0 }
-            return Darwin.write(descriptor, base, data.count)
-        }
-        guard written == data.count else { throw UnixSocketError.write(errno) }
+        try writeAll(descriptor, data: data)
         Darwin.shutdown(descriptor, SHUT_WR)
 
         var buffer = [UInt8](repeating: 0, count: 4096)

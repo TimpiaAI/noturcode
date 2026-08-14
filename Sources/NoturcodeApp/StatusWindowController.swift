@@ -153,15 +153,23 @@ private struct StatusOverviewView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.91))
                 Spacer()
-                Button(action: { searchText = "" }) {
+                Menu {
+                    Button("Start Codex") { model.createNativeSession(provider: .codex) }
+                    Button("Start Gemini") { model.createNativeSession(provider: .gemini) }
+                    Button("Start Grok") { model.createNativeSession(provider: .grok) }
+                    Divider()
+                    Button("Connect OpenCode") { model.connectOpenCodeServer() }
+                } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 11, weight: .semibold))
                         .frame(width: 26, height: 26)
                         .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
                 }
-                .buttonStyle(.plain)
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .frame(width: 26)
                 .clickableCursor()
-                .help("Clear session search")
+                .help("Start or connect a native coding session")
             }
             .padding(.horizontal, 14)
             .padding(.top, 34)
@@ -279,6 +287,7 @@ private struct StatusOverviewView: View {
                     session: session,
                     reader: model.transcriptReader,
                     sender: model.promptSender,
+                    nativeSessions: model.nativeSessions,
                     onPreviewFile: { model.filePreviews.show(url: $0) },
                     presentation: .desktop
                 )

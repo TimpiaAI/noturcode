@@ -4,10 +4,7 @@ import ApplicationServices
 @MainActor
 final class ITermPaneGeometryResolver {
     func focusedPaneFrame() -> CGRect? {
-        if let frame = accessibilityFocusedPaneFrame() {
-            return frame
-        }
-        return systemEventsFocusedPaneFrame()
+        accessibilityFocusedPaneFrame()
     }
 
     private func accessibilityFocusedPaneFrame() -> CGRect? {

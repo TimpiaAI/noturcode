@@ -113,24 +113,440 @@ public struct SessionKey: Hashable, Codable, Sendable, CustomStringConvertible {
 }
 
 public struct TerminalTarget: Codable, Equatable, Sendable {
+    /// This remains the only encoded field on a target. Older session files
+    /// contain only this value, so the exact native session ID stays readable
+    /// and decodable without a migration.
     public var sessionID: String
 
     public init(sessionID: String) {
         self.sessionID = sessionID
     }
 
+    public var identity: TerminalIdentity? {
+        TerminalIdentity.parse(sessionID: sessionID)
+    }
+
     public var uniqueID: String {
-        sessionID.split(separator: ":", maxSplits: 1).last.map(String.init) ?? sessionID
+        if let identity {
+            return identity.nativeSessionID
+                ?? identity.tmuxPane
+                ?? identity.zellijPaneID
+                ?? identity.weztermPane
+                ?? identity.kittyWindowID
+                ?? identity.tty
+                ?? sessionID
+        }
+        return sessionID.split(separator: ":", maxSplits: 1).last.map(String.init) ?? sessionID
     }
 
     public var revealURL: URL? {
-        guard !sessionID.hasPrefix("terminal:") else { return nil }
+        guard applicationKind == .iterm, identity?.multiplexer == nil else { return nil }
         var components = URLComponents()
         components.scheme = "iterm2"
         components.host = ""
         components.path = "/reveal"
         components.queryItems = [URLQueryItem(name: "sessionid", value: sessionID)]
         return components.url
+    }
+
+    public var applicationKind: TerminalApplicationKind {
+        if let identity { return identity.application }
+        return sessionID.hasPrefix("terminal:") ? .unknown : .iterm
+    }
+
+    public var multiplexer: TerminalMultiplexerKind? {
+        identity?.multiplexer
+    }
+
+    public var tty: String? {
+        identity?.tty
+    }
+
+    public var processID: Int32? {
+        identity?.processID
+    }
+
+    public var remoteSocket: String? {
+        identity?.remoteSocket
+    }
+
+    public var exactIdentifier: String? {
+        identity?.exactIdentifier
+    }
+}
+
+public enum TerminalApplicationKind: String, Codable, CaseIterable, Sendable {
+    case iterm
+    case terminal
+    case ghostty
+    case warp
+    case wezterm
+    case kitty
+    case unknown
+
+    public var displayName: String {
+        switch self {
+        case .iterm: "iTerm2"
+        case .terminal: "Terminal"
+        case .ghostty: "Ghostty"
+        case .warp: "Warp"
+        case .wezterm: "WezTerm"
+        case .kitty: "kitty"
+        case .unknown: "Terminal"
+        }
+    }
+
+    public var bundleIdentifier: String? {
+        switch self {
+        case .iterm: "com.googlecode.iterm2"
+        case .terminal: "com.apple.Terminal"
+        case .ghostty: "com.mitchellh.ghostty"
+        case .warp: "dev.warp.Warp-Stable"
+        case .wezterm: "com.github.wez.wezterm"
+        case .kitty: "net.kovidgoyal.kitty"
+        case .unknown: nil
+        }
+    }
+
+    public static func detect(bundleIdentifier: String?, terminalProgram: String?) -> TerminalApplicationKind {
+        let value = (bundleIdentifier ?? terminalProgram ?? "").lowercased()
+        if value.contains("iterm") { return .iterm }
+        if value.contains("ghostty") { return .ghostty }
+        if value.contains("warp") { return .warp }
+        if value.contains("wezterm") || value.contains("wez.term") { return .wezterm }
+        if value.contains("kitty") { return .kitty }
+        if value.contains("terminal") || value.contains("apple_terminal") { return .terminal }
+        return .unknown
+    }
+}
+
+public enum TerminalMultiplexerKind: String, Codable, CaseIterable, Sendable {
+    case tmux
+    case zellij
+}
+
+/// The environment values that identify one terminal surface and, where
+/// possible, one multiplexer pane. The canonical session ID is deliberately
+/// compact and human-readable because it is stored in existing session files.
+public struct TerminalIdentity: Codable, Equatable, Sendable {
+    public var application: TerminalApplicationKind
+    public var multiplexer: TerminalMultiplexerKind?
+    public var nativeSessionID: String?
+    public var terminalProgram: String?
+    public var tty: String?
+    public var processID: Int32?
+    public var bundleIdentifier: String?
+    public var weztermPane: String?
+    public var weztermUnixSocket: String?
+    public var kittyWindowID: String?
+    public var kittyRemoteSocket: String?
+    public var tmux: String?
+    public var tmuxSocket: String?
+    public var tmuxPane: String?
+    public var zellijSessionName: String?
+    public var zellijPaneID: String?
+    public var sshTTY: String?
+    public var sshConnection: String?
+
+    public init(
+        application: TerminalApplicationKind,
+        multiplexer: TerminalMultiplexerKind? = nil,
+        nativeSessionID: String? = nil,
+        terminalProgram: String? = nil,
+        tty: String? = nil,
+        processID: Int32? = nil,
+        bundleIdentifier: String? = nil,
+        weztermPane: String? = nil,
+        weztermUnixSocket: String? = nil,
+        kittyWindowID: String? = nil,
+        kittyRemoteSocket: String? = nil,
+        tmux: String? = nil,
+        tmuxSocket: String? = nil,
+        tmuxPane: String? = nil,
+        zellijSessionName: String? = nil,
+        zellijPaneID: String? = nil,
+        sshTTY: String? = nil,
+        sshConnection: String? = nil
+    ) {
+        self.application = application
+        self.multiplexer = multiplexer
+        self.nativeSessionID = nativeSessionID
+        self.terminalProgram = terminalProgram
+        self.tty = tty
+        self.processID = processID
+        self.bundleIdentifier = bundleIdentifier
+        self.weztermPane = weztermPane
+        self.weztermUnixSocket = weztermUnixSocket
+        self.kittyWindowID = kittyWindowID
+        self.kittyRemoteSocket = kittyRemoteSocket
+        self.tmux = tmux
+        self.tmuxSocket = tmuxSocket
+        self.tmuxPane = tmuxPane
+        self.zellijSessionName = zellijSessionName
+        self.zellijPaneID = zellijPaneID
+        self.sshTTY = sshTTY
+        self.sshConnection = sshConnection
+    }
+
+    public var exactIdentifier: String? {
+        switch multiplexer {
+        case .tmux: return tmuxPane
+        case .zellij: return zellijPaneID
+        case nil:
+            switch application {
+            case .wezterm: return weztermPane
+            case .kitty: return kittyWindowID
+            case .iterm: return nativeSessionID
+            case .ghostty, .terminal, .warp, .unknown: return tty
+            }
+        }
+    }
+
+    public var remoteSocket: String? {
+        switch application {
+        case .wezterm: return weztermUnixSocket
+        case .kitty: return kittyRemoteSocket
+        default: return nil
+        }
+    }
+
+    /// The stable value sent through the old BridgeEvent. Existing iTerm IDs
+    /// remain byte-for-byte unchanged when no extra identity is needed.
+    public var sessionID: String {
+        if multiplexer == nil,
+           application == .iterm,
+           let nativeSessionID,
+           bundleIdentifier == nil,
+           sshTTY == nil,
+           sshConnection == nil {
+            return nativeSessionID
+        }
+
+        if multiplexer == nil,
+           application == .terminal,
+           let tty,
+           bundleIdentifier == nil,
+           sshTTY == nil,
+           sshConnection == nil,
+           weztermPane == nil,
+           kittyWindowID == nil {
+            return "terminal:\(terminalProgram ?? "terminal"):\(Self.encode(tty))"
+        }
+
+        let resource: String
+        switch multiplexer {
+        case .tmux:
+            resource = "tmux:\(tmuxPane.map(Self.encode) ?? "unknown")"
+        case .zellij:
+            resource = "zellij:\(zellijPaneID.map(Self.encode) ?? "unknown")"
+        case nil:
+            if application == .iterm, let nativeSessionID {
+                resource = "session:\(Self.encode(nativeSessionID))"
+            } else if application == .wezterm, let weztermPane {
+                resource = "pane:\(Self.encode(weztermPane))"
+            } else if application == .kitty, let kittyWindowID {
+                resource = "window:\(Self.encode(kittyWindowID))"
+            } else if let tty, !tty.isEmpty {
+                resource = "tty:\(Self.encode(tty))"
+            } else if let processID, processID > 0 {
+                resource = "pid-\(processID)"
+            } else {
+                resource = "unknown"
+            }
+        }
+
+        var query: [(String, String)] = []
+        if let bundleIdentifier, !bundleIdentifier.isEmpty, application != .iterm {
+            query.append(("bundle", bundleIdentifier))
+        }
+        if let processID, processID > 0, application == .ghostty {
+            query.append(("pid", String(processID)))
+        }
+        if let tty, !tty.isEmpty, !resource.hasPrefix("tty:") {
+            query.append(("tty", tty))
+        }
+        if let weztermUnixSocket, !weztermUnixSocket.isEmpty {
+            query.append(("socket", weztermUnixSocket))
+        }
+        if let kittyRemoteSocket, !kittyRemoteSocket.isEmpty {
+            query.append(("socket", kittyRemoteSocket))
+        }
+        if let tmux, !tmux.isEmpty {
+            query.append(("tmux", tmux))
+        }
+        if let tmuxSocket, !tmuxSocket.isEmpty {
+            query.append(("tmuxSocket", tmuxSocket))
+        }
+        if let zellijSessionName, !zellijSessionName.isEmpty {
+            query.append(("session", zellijSessionName))
+        }
+        if let sshTTY, !sshTTY.isEmpty {
+            query.append(("sshTTY", sshTTY))
+        }
+        if let sshConnection, !sshConnection.isEmpty {
+            query.append(("sshConnection", sshConnection))
+        }
+
+        let suffix = query.isEmpty
+            ? ""
+            : "?" + query.map { "\(Self.encode($0.0))=\(Self.encode($0.1))" }.joined(separator: "&")
+        return "terminal:\(application.rawValue):\(resource)\(suffix)"
+    }
+
+    public static func capture(environment: [String: String], sourceProcessID: Int32? = nil) -> TerminalIdentity? {
+        func value(_ key: String) -> String? {
+            guard let raw = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+                return nil
+            }
+            return raw
+        }
+
+        let bundleIdentifier = value("__CFBundleIdentifier")
+        let terminalProgram = value("TERM_PROGRAM") ?? value("LC_TERMINAL") ?? value("TERMINAL_EMULATOR")
+        let application = TerminalApplicationKind.detect(
+            bundleIdentifier: bundleIdentifier,
+            terminalProgram: terminalProgram
+        )
+        let nativeSessionID = value("TERM_SESSION_ID")
+        let tty = value("TTY") ?? value("SSH_TTY")
+        let weztermPane = value("WEZTERM_PANE")
+        let weztermUnixSocket = value("WEZTERM_UNIX_SOCKET")
+        let kittyWindowID = value("KITTY_WINDOW_ID")
+        let kittyRemoteSocket = value("KITTY_LISTEN_ON")
+        let tmux = value("TMUX")
+        let tmuxPane = value("TMUX_PANE")
+        let zellijSessionName = value("ZELLIJ_SESSION_NAME")
+        let zellijPaneID = value("ZELLIJ_PANE_ID")
+        let sshTTY = value("SSH_TTY")
+        let sshConnection = value("SSH_CONNECTION")
+        let multiplexer: TerminalMultiplexerKind?
+        if tmux != nil || tmuxPane != nil {
+            multiplexer = .tmux
+        } else if zellijSessionName != nil || zellijPaneID != nil {
+            multiplexer = .zellij
+        } else {
+            multiplexer = nil
+        }
+
+        let hasIdentity = nativeSessionID != nil
+            || weztermPane != nil
+            || weztermUnixSocket != nil
+            || kittyWindowID != nil
+            || tmux != nil
+            || tmuxPane != nil
+            || zellijSessionName != nil
+            || zellijPaneID != nil
+            || tty != nil
+            || sourceProcessID.map({ $0 > 0 }) == true
+        guard hasIdentity else { return nil }
+
+        let tmuxSocket = tmux?.split(separator: ",", maxSplits: 1).first.map(String.init)
+        return TerminalIdentity(
+            application: application == .unknown && nativeSessionID != nil ? .iterm : application,
+            multiplexer: multiplexer,
+            nativeSessionID: nativeSessionID,
+            terminalProgram: terminalProgram,
+            tty: tty,
+            processID: sourceProcessID,
+            bundleIdentifier: bundleIdentifier,
+            weztermPane: weztermPane,
+            weztermUnixSocket: weztermUnixSocket,
+            kittyWindowID: kittyWindowID,
+            kittyRemoteSocket: kittyRemoteSocket,
+            tmux: tmux,
+            tmuxSocket: tmuxSocket,
+            tmuxPane: tmuxPane,
+            zellijSessionName: zellijSessionName,
+            zellijPaneID: zellijPaneID,
+            sshTTY: sshTTY,
+            sshConnection: sshConnection
+        )
+    }
+
+    public static func parse(sessionID: String) -> TerminalIdentity? {
+        guard sessionID.hasPrefix("terminal:") else { return nil }
+        let body = String(sessionID.dropFirst("terminal:".count))
+        let parts = body.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return nil }
+        let application = TerminalApplicationKind.detect(bundleIdentifier: String(parts[0]), terminalProgram: String(parts[0]))
+        let resourceAndQuery = String(parts[1])
+        let resourceParts = resourceAndQuery.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let resource = decode(String(resourceParts[0]))
+        var values: [String: String] = [:]
+        if resourceParts.count == 2 {
+            for pair in resourceParts[1].split(separator: "&", omittingEmptySubsequences: true) {
+                let fields = pair.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard fields.count == 2 else { continue }
+                values[decode(String(fields[0]))] = decode(String(fields[1]))
+            }
+        }
+
+        var multiplexer: TerminalMultiplexerKind?
+        var nativeSessionID: String?
+        var tty: String?
+        var weztermPane: String?
+        var kittyWindowID: String?
+        var tmuxPane: String?
+        var zellijPaneID: String?
+        if resource.hasPrefix("tmux:") {
+            multiplexer = .tmux
+            tmuxPane = String(resource.dropFirst("tmux:".count))
+            if tmuxPane == "unknown" { tmuxPane = nil }
+        } else if resource.hasPrefix("zellij:") {
+            multiplexer = .zellij
+            zellijPaneID = String(resource.dropFirst("zellij:".count))
+            if zellijPaneID == "unknown" { zellijPaneID = nil }
+        } else if resource.hasPrefix("session:") {
+            nativeSessionID = decode(String(resource.dropFirst("session:".count)))
+        } else if resource.hasPrefix("pane:") {
+            weztermPane = decode(String(resource.dropFirst("pane:".count)))
+        } else if resource.hasPrefix("window:") {
+            kittyWindowID = decode(String(resource.dropFirst("window:".count)))
+        } else if resource.hasPrefix("tty:") {
+            tty = decode(String(resource.dropFirst("tty:".count)))
+        } else if resource.hasPrefix("pid-") {
+            values["pid"] = String(resource.dropFirst("pid-".count))
+        } else if !resource.isEmpty, resource != "unknown" {
+            // Compatibility with the earlier terminal:<program>:<tty> format.
+            tty = resource
+        }
+
+        let processID = values["pid"].flatMap(Int32.init)
+        let tmux = values["tmux"]
+        if multiplexer == nil, values["mux"] == TerminalMultiplexerKind.tmux.rawValue {
+            multiplexer = .tmux
+        } else if multiplexer == nil, values["mux"] == TerminalMultiplexerKind.zellij.rawValue {
+            multiplexer = .zellij
+        }
+        return TerminalIdentity(
+            application: application,
+            multiplexer: multiplexer,
+            nativeSessionID: nativeSessionID,
+            terminalProgram: values["program"],
+            tty: tty ?? values["tty"],
+            processID: processID,
+            bundleIdentifier: values["bundle"],
+            weztermPane: weztermPane,
+            weztermUnixSocket: application == .wezterm ? values["socket"] : nil,
+            kittyWindowID: kittyWindowID,
+            kittyRemoteSocket: application == .kitty ? values["socket"] : nil,
+            tmux: tmux,
+            tmuxSocket: values["tmuxSocket"] ?? tmux?.split(separator: ",", maxSplits: 1).first.map(String.init),
+            tmuxPane: tmuxPane,
+            zellijSessionName: values["session"],
+            zellijPaneID: zellijPaneID,
+            sshTTY: values["sshTTY"],
+            sshConnection: values["sshConnection"]
+        )
+    }
+
+    private static func encode(_ value: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~/"))
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private static func decode(_ value: String) -> String {
+        value.removingPercentEncoding ?? value
     }
 }
 
@@ -179,10 +595,36 @@ public struct ActivitySnapshot: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+public enum NativeSessionTransport: String, Codable, CaseIterable, Sendable {
+    case codexAppServer
+    case acp
+    case openCodeServer
+}
+
+/// A provider conversation that Noturcode controls through a native protocol.
+/// It is separate from TerminalTarget because a native session can exist with
+/// no terminal window, tab, TTY, or pane.
+public struct NativeSessionConnection: Codable, Equatable, Sendable {
+    public var transport: NativeSessionTransport
+    public var conversationID: String
+    public var endpoint: String?
+
+    public init(
+        transport: NativeSessionTransport,
+        conversationID: String,
+        endpoint: String? = nil
+    ) {
+        self.transport = transport
+        self.conversationID = conversationID
+        self.endpoint = endpoint
+    }
+}
+
 public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
     public var key: SessionKey
     public var name: String
-    public var terminal: TerminalTarget
+    public var terminal: TerminalTarget?
+    public var nativeSession: NativeSessionConnection?
     public var sourceProcessID: Int32?
     public var cwd: String?
     public var transcriptPath: String?
@@ -203,7 +645,8 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
     public init(
         key: SessionKey,
         name: String,
-        terminal: TerminalTarget,
+        terminal: TerminalTarget? = nil,
+        nativeSession: NativeSessionConnection? = nil,
         sourceProcessID: Int32?,
         cwd: String?,
         transcriptPath: String? = nil,
@@ -222,6 +665,7 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
         self.key = key
         self.name = name
         self.terminal = terminal
+        self.nativeSession = nativeSession
         self.sourceProcessID = sourceProcessID
         self.cwd = cwd
         self.transcriptPath = transcriptPath
@@ -286,6 +730,7 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
     public var timestamp: Date
     public var name: String?
     public var terminalSessionID: String?
+    public var nativeSession: NativeSessionConnection?
     public var sourceProcessID: Int32?
     public var cwd: String?
     public var transcriptPath: String?
@@ -305,6 +750,7 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
         timestamp: Date = Date(),
         name: String? = nil,
         terminalSessionID: String? = nil,
+        nativeSession: NativeSessionConnection? = nil,
         sourceProcessID: Int32? = nil,
         cwd: String? = nil,
         transcriptPath: String? = nil,
@@ -323,6 +769,7 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
         self.timestamp = timestamp
         self.name = name
         self.terminalSessionID = terminalSessionID
+        self.nativeSession = nativeSession
         self.sourceProcessID = sourceProcessID
         self.cwd = cwd
         self.transcriptPath = transcriptPath

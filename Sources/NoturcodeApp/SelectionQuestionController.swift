@@ -9,7 +9,7 @@ final class SelectionQuestionCoordinator {
     func show(request: SelectionContextRequest, sessions: [TrackedSession]) {
         let cwd = sessions.first(where: {
             guard let terminalSessionID = request.terminalSessionID else { return false }
-            return $0.terminal.sessionID == terminalSessionID || $0.terminal.uniqueID == terminalSessionID
+            return $0.terminal?.sessionID == terminalSessionID || $0.terminal?.uniqueID == terminalSessionID
         })?.cwd
 
         if let window = controller?.window {

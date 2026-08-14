@@ -1,3 +1,5 @@
+import AppKit
+import QuartzCore
 import SwiftUI
 import NoturcodeCore
 
@@ -23,11 +25,9 @@ struct NotchSurfaceView: View {
 
     private var surfaceHeight: CGFloat {
         if state.isExpanded {
-            return min(
-                520,
-                metrics.expandedHeight(sessionCount: store.sessions.count)
-                    + metrics.dockRailHeight(sessionCount: store.sessions.count)
-                    + state.activityHeightAdjustment(in: store.sessions)
+            return metrics.expandedSurfaceHeight(
+                sessionCount: store.sessions.count,
+                activityAdjustment: state.activityHeightAdjustment(in: store.sessions)
             )
         }
         return metrics.collapsedHeight(sessionCount: store.sessions.count)
@@ -344,6 +344,9 @@ private struct AdaptiveDockHeader: View {
                 animate: true,
                 completionIsUnread: completionReads.isUnread(session)
             )
+            if let terminal = session.terminal {
+                TerminalAppMark(target: terminal, size: 9)
+            }
             Text(session.name)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.92))
@@ -413,6 +416,59 @@ private struct AdaptiveDockHeader: View {
     }
 }
 
+@MainActor
+private final class TerminalIconCache {
+    static let shared = TerminalIconCache()
+    private var images: [TerminalApplicationKind: NSImage] = [:]
+
+    func image(for kind: TerminalApplicationKind) -> NSImage? {
+        if let image = images[kind] { return image }
+        if let bundleIdentifier = kind.bundleIdentifier,
+           let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
+            let image = NSWorkspace.shared.icon(forFile: applicationURL.path)
+            images[kind] = image
+            return image
+        }
+        let path: String
+        switch kind {
+        case .iterm: path = "/Applications/iTerm.app"
+        case .terminal: path = "/System/Applications/Utilities/Terminal.app"
+        case .ghostty: path = "/Applications/Ghostty.app"
+        case .warp: path = "/Applications/Warp.app"
+        case .wezterm: path = "/Applications/WezTerm.app"
+        case .kitty: path = "/Applications/kitty.app"
+        case .unknown: return nil
+        }
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        images[kind] = image
+        return image
+    }
+}
+
+private struct TerminalAppMark: View {
+    let target: TerminalTarget
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let image = TerminalIconCache.shared.image(for: target.applicationKind) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: "terminal")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(.white.opacity(0.56))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+        .help(target.applicationKind.displayName)
+    }
+}
+
 struct AnnouncementView: View {
     let announcement: AttentionAnnouncement
 
@@ -443,15 +499,7 @@ struct AnnouncementView: View {
                     .foregroundStyle(accent.opacity(0.90))
                 }
                 Spacer(minLength: 0)
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: announcement.isPaused)) { context in
-                    ZStack {
-                        Circle().stroke(.white.opacity(0.16), lineWidth: 1.5)
-                        Circle()
-                            .trim(from: 0, to: announcement.progress(at: context.date))
-                            .stroke(.white.opacity(0.88), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                            .rotationEffect(.degrees(-90))
-                    }
-                }
+                AnnouncementProgressRing(announcement: announcement)
                 .frame(width: 17, height: 17)
         }
         .padding(.horizontal, 18)
@@ -473,5 +521,75 @@ struct AnnouncementView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(announcement.name), \(announcement.kind.label)")
         .accessibilityHint("Focus this session in iTerm2")
+    }
+}
+
+private struct AnnouncementProgressRing: NSViewRepresentable {
+    let announcement: AttentionAnnouncement
+
+    func makeNSView(context: Context) -> AnnouncementProgressRingView {
+        AnnouncementProgressRingView()
+    }
+
+    func updateNSView(_ view: AnnouncementProgressRingView, context: Context) {
+        view.configure(announcement)
+    }
+}
+
+private final class AnnouncementProgressRingView: NSView {
+    private let trackLayer = CAShapeLayer()
+    private let progressLayer = CAShapeLayer()
+    private var configuredID: UUID?
+    private var configuredPaused = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        for shape in [trackLayer, progressLayer] {
+            shape.fillColor = NSColor.clear.cgColor
+            shape.lineWidth = 1.5
+            layer?.addSublayer(shape)
+        }
+        trackLayer.strokeColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        progressLayer.strokeColor = NSColor.white.withAlphaComponent(0.88).cgColor
+        progressLayer.lineCap = .round
+        progressLayer.transform = CATransform3DMakeRotation(-.pi / 2, 0, 0, 1)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        let path = CGPath(ellipseIn: bounds.insetBy(dx: 1, dy: 1), transform: nil)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for shape in [trackLayer, progressLayer] {
+            shape.frame = bounds
+            shape.path = path
+        }
+        CATransaction.commit()
+    }
+
+    func configure(_ announcement: AttentionAnnouncement) {
+        guard configuredID != announcement.id || configuredPaused != announcement.isPaused else { return }
+        configuredID = announcement.id
+        configuredPaused = announcement.isPaused
+        progressLayer.removeAnimation(forKey: "noturcode.announcement-progress")
+
+        let remainingFraction = announcement.progress(at: Date())
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        progressLayer.strokeEnd = remainingFraction
+        CATransaction.commit()
+        guard !announcement.isPaused, announcement.remaining > 0 else { return }
+
+        let animation = CABasicAnimation(keyPath: "strokeEnd")
+        animation.fromValue = remainingFraction
+        animation.toValue = 0
+        animation.duration = max(0.05, announcement.remaining)
+        animation.timingFunction = CAMediaTimingFunction(name: .linear)
+        animation.isRemovedOnCompletion = false
+        animation.fillMode = .forwards
+        progressLayer.add(animation, forKey: "noturcode.announcement-progress")
     }
 }

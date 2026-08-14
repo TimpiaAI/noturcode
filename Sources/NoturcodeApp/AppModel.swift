@@ -3,6 +3,20 @@ import Combine
 import Foundation
 import NoturcodeCore
 
+enum NativeAgentProvider {
+    case codex
+    case gemini
+    case grok
+
+    var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .gemini: "Gemini"
+        case .grok: "Grok"
+        }
+    }
+}
+
 @MainActor
 final class CompletionReadStore: ObservableObject {
     @Published private var seenCompletionTimes: [String: TimeInterval]
@@ -47,7 +61,14 @@ final class AppModel: ObservableObject {
     let paneGeometryResolver = ITermPaneGeometryResolver()
     let paneHighlight = TerminalPaneHighlightCoordinator()
     let transcriptReader = AgentTranscriptReader()
-    let promptSender = ITermPromptSender()
+    let terminalPromptSender = ITermPromptSender()
+    lazy var nativeSessions = NativeSessionCoordinator { [weak self] event in
+        await MainActor.run { self?.receive(event) }
+    }
+    lazy var promptSender = SessionPromptRouter(
+        terminalSender: terminalPromptSender,
+        nativeSessions: nativeSessions
+    )
     let terminalWindows = TerminalViewportWindowCoordinator()
     let filePreviews = FilePreviewWindowCoordinator()
     let completionReads = CompletionReadStore()
@@ -95,8 +116,10 @@ final class AppModel: ObservableObject {
         for session in store.sessions {
             if let pid = session.sourceProcessID {
                 processMonitor?.watch(key: session.key, pid: pid)
-                if let currentTarget = terminalResolver.resolve(processID: pid) {
-                    store.rebindTerminal(for: session.key, to: currentTarget)
+                Task { [weak self] in
+                    guard let self,
+                          let currentTarget = await self.terminalResolver.resolve(processID: pid) else { return }
+                    self.store.rebindTerminal(for: session.key, to: currentTarget)
                 }
             }
         }
@@ -113,13 +136,8 @@ final class AppModel: ObservableObject {
                   envelope.version == BridgeEnvelope.currentVersion else {
                 return Data("{\"ok\":false}".utf8)
             }
-            let applicationCompleted = DispatchSemaphore(value: 0)
             Task { @MainActor in
                 self?.receive(envelope.event)
-                applicationCompleted.signal()
-            }
-            guard applicationCompleted.wait(timeout: .now() + 1.5) == .success else {
-                return Data("{\"ok\":false}".utf8)
             }
             return Data("{\"ok\":true}".utf8)
         }
@@ -138,6 +156,10 @@ final class AppModel: ObservableObject {
         displayCoordinator = DisplayCoordinator(model: self)
         displayCoordinator?.start()
         startTranscriptReconciliation()
+        let persistedSessions = store.sessions
+        Task { [weak self] in
+            await self?.nativeSessions.restore(persistedSessions)
+        }
     }
 
     func stop() {
@@ -150,30 +172,39 @@ final class AppModel: ObservableObject {
         displayCoordinator = nil
         processMonitor?.stop()
         processMonitor = nil
+        terminalWindows.closeAll()
+        Task { [nativeSessions] in await nativeSessions.stopAll() }
         socketServer?.stop()
         socketServer = nil
     }
 
     func jump(to session: TrackedSession) {
         completionReads.markSeen(session)
+        guard session.terminal != nil else {
+            showTerminalWindow(for: session)
+            return
+        }
         Task {
-            var target = session.terminal
-            var result = navigator.reveal(target)
+            guard var target = session.terminal else { return }
+            var result = await navigator.reveal(target)
             if case .missing = result,
                let pid = session.sourceProcessID,
-               let rebound = terminalResolver.resolve(processID: pid) {
+               let rebound = await terminalResolver.resolve(processID: pid) {
                 target = rebound
                 store.rebindTerminal(for: session.key, to: rebound)
-                result = navigator.reveal(rebound)
+                result = await navigator.reveal(rebound)
             }
             switch result {
             case .revealed:
                 logNavigation("revealed", session: session)
-                await showPaneSpotlight(for: session)
+                if target.applicationKind == .iterm {
+                    await showPaneSpotlight(for: session)
+                }
             case .missing:
                 logNavigation("missing", session: session)
-                showStaleMessage("\(session.name) is no longer open in iTerm2.")
-                store.remove(session.key, staleMessage: "\(session.name) is no longer open in iTerm2.")
+                let terminalName = target.applicationKind.displayName
+                showStaleMessage("\(session.name) is no longer open in \(terminalName).")
+                store.remove(session.key, staleMessage: "\(session.name) is no longer open in \(terminalName).")
             case let .failed(message):
                 logNavigation("failed:\(message)", session: session)
                 showStaleMessage(message)
@@ -183,26 +214,21 @@ final class AppModel: ObservableObject {
 
     private func logNavigation(_ result: String, session: TrackedSession) {
         appendDiagnostic(
-            "\(ISO8601DateFormatter().string(from: Date())) navigation=\(result) session=\(session.id) terminal=\(session.terminal.uniqueID)\n"
+            "\(ISO8601DateFormatter().string(from: Date())) navigation=\(result) session=\(session.id) terminal=\(session.terminal?.uniqueID ?? "native")\n"
         )
     }
 
     private func showPaneSpotlight(for session: TrackedSession) async {
         do {
-            try await Task.sleep(for: .milliseconds(90))
+            try await Task.sleep(for: .milliseconds(55))
         } catch { return }
 
-        for attempt in 0..<8 {
-            if let frame = paneGeometryResolver.focusedPaneFrame() {
-                paneHighlight.show(frame: frame, session: session)
-                logSpotlight("shown", session: session, frame: frame, attempt: attempt + 1)
-                return
-            }
-            do {
-                try await Task.sleep(for: .milliseconds(60))
-            } catch { return }
+        if let frame = paneGeometryResolver.focusedPaneFrame() {
+            paneHighlight.show(frame: frame, session: session)
+            logSpotlight("shown", session: session, frame: frame, attempt: 1)
+            return
         }
-        logSpotlight("geometry-missing", session: session, frame: nil, attempt: 8)
+        logSpotlight("geometry-missing", session: session, frame: nil, attempt: 1)
     }
 
     private func logSpotlight(_ result: String, session: TrackedSession, frame: CGRect?, attempt: Int) {
@@ -224,6 +250,81 @@ final class AppModel: ObservableObject {
         StatusWindowController.shared.show(model: self)
     }
 
+    func createNativeSession(provider: NativeAgentProvider) {
+        let panel = NSOpenPanel()
+        panel.title = "Choose a project for \(provider.displayName)"
+        panel.prompt = "Start session"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let name = url.lastPathComponent.isEmpty ? provider.displayName : url.lastPathComponent
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                switch provider {
+                case .codex:
+                    _ = try await nativeSessions.startCodexSession(name: name, cwd: url.path)
+                case .gemini:
+                    _ = try await nativeSessions.startACPSession(provider: .gemini, name: name, cwd: url.path)
+                case .grok:
+                    _ = try await nativeSessions.startACPSession(provider: .grok, name: name, cwd: url.path)
+                }
+            } catch {
+                showStaleMessage(error.localizedDescription)
+            }
+        }
+    }
+
+    func connectOpenCodeServer() {
+        do {
+            if let environmentConfiguration = try OpenCodeServerConfiguration.fromEnvironment() {
+                Task { [weak self] in
+                    do {
+                        try await self?.nativeSessions.startOpenCode(configuration: environmentConfiguration)
+                    } catch {
+                        await MainActor.run { self?.showStaleMessage(error.localizedDescription) }
+                    }
+                }
+                return
+            }
+        } catch {
+            showStaleMessage(error.localizedDescription)
+            return
+        }
+
+        let defaultsKey = "noturcode.opencode-server-url"
+        let field = NSTextField(string: UserDefaults.standard.string(forKey: defaultsKey) ?? "http://127.0.0.1:4096")
+        field.placeholderString = "http://127.0.0.1:4096"
+        field.frame = CGRect(x: 0, y: 0, width: 340, height: 24)
+        let alert = NSAlert()
+        alert.messageText = "Connect OpenCode"
+        alert.informativeText = "Enter the explicit localhost URL from `opencode serve`."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Connect")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        let rawURL = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: rawURL) else {
+            showStaleMessage("OpenCode URL is not valid.")
+            return
+        }
+        do {
+            let configuration = try OpenCodeServerConfiguration(baseURL: url)
+            UserDefaults.standard.set(rawURL, forKey: defaultsKey)
+            Task { [weak self] in
+                do {
+                    try await self?.nativeSessions.startOpenCode(configuration: configuration)
+                } catch {
+                    await MainActor.run { self?.showStaleMessage(error.localizedDescription) }
+                }
+            }
+        } catch {
+            showStaleMessage(error.localizedDescription)
+        }
+    }
+
     func showTerminalWindow(for session: TrackedSession) {
         completionReads.markSeen(session)
         displayCoordinator?.dismissAll()
@@ -236,6 +337,7 @@ final class AppModel: ObservableObject {
         askingEscalations[session.key]?.cancel()
         askingEscalations[session.key] = nil
         announcements.dismiss(sessionKey: session.key)
+        Task { [nativeSessions] in await nativeSessions.stop(session: session) }
         store.remove(session.key)
         displayCoordinator?.sessionStateDidChange()
     }
@@ -246,8 +348,10 @@ final class AppModel: ObservableObject {
         case .connect, .sessionStarted:
             if let pid = event.sourceProcessID {
                 processMonitor?.watch(key: event.key, pid: pid)
-                if let currentTarget = terminalResolver.resolve(processID: pid) {
-                    store.rebindTerminal(for: event.key, to: currentTarget)
+                Task { [weak self] in
+                    guard let self,
+                          let currentTarget = await self.terminalResolver.resolve(processID: pid) else { return }
+                    self.store.rebindTerminal(for: event.key, to: currentTarget)
                 }
             }
         case .disconnect, .sessionEnded:
@@ -280,22 +384,23 @@ final class AppModel: ObservableObject {
                         lastPromptAt: session.lastPromptAt
                     )
                 }
-                let completedKeys = await Task.detached(priority: .utility) {
-                    candidates.compactMap { candidate in
+                let completedCandidates = await Task.detached(priority: .utility) {
+                    candidates.filter { candidate in
                         TranscriptRunStateDetector.turnCompleted(
                             atPath: candidate.path,
                             source: candidate.source,
                             after: candidate.lastPromptAt
-                        ) ? candidate.key : nil
+                        )
                     }
                 }.value
-                for key in completedKeys {
-                    guard let current = self.store.sessions.first(where: { $0.key == key }),
-                          current.state == .working else { continue }
+                for candidate in completedCandidates {
+                    guard let current = self.store.sessions.first(where: { $0.key == candidate.key }),
+                          current.state == .working,
+                          current.lastPromptAt == candidate.lastPromptAt else { continue }
                     self.receive(BridgeEvent(
                         kind: .responseCompleted,
-                        source: key.source,
-                        sessionID: key.sessionID
+                        source: candidate.key.source,
+                        sessionID: candidate.key.sessionID
                     ))
                 }
             }

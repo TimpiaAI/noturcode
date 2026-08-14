@@ -42,29 +42,33 @@ final class NoturcodeAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         if CommandLine.arguments.contains("--iterm-prompt-self-test") {
-            let result = ITermPromptSender().send(
-                "__NO_SEND__",
-                to: TerminalTarget(sessionID: "__NOTURCODE_NONEXISTENT_SESSION__")
-            )
-            switch result {
-            case .sent: print("ITERM_PROMPT_SELF_TEST:SENT")
-            case .missing: print("ITERM_PROMPT_SELF_TEST:MISSING")
-            case let .failed(message): print("ITERM_PROMPT_SELF_TEST:FAILED:\(message)")
+            Task {
+                let result = await ITermPromptSender().send(
+                    "__NO_SEND__",
+                    to: TerminalTarget(sessionID: "__NOTURCODE_NONEXISTENT_SESSION__")
+                )
+                switch result {
+                case .sent: print("ITERM_PROMPT_SELF_TEST:SENT")
+                case .missing: print("ITERM_PROMPT_SELF_TEST:MISSING")
+                case let .failed(message): print("ITERM_PROMPT_SELF_TEST:FAILED:\(message)")
+                }
+                NSApplication.shared.terminate(nil)
             }
-            NSApplication.shared.terminate(nil)
             return
         }
 
         if CommandLine.arguments.contains("--iterm-navigation-self-test") {
-            let result = ITermNavigator().reveal(
-                TerminalTarget(sessionID: "__NOTURCODE_NONEXISTENT_SESSION__")
-            )
-            switch result {
-            case .revealed: print("ITERM_NAVIGATION_SELF_TEST:REVEALED")
-            case .missing: print("ITERM_NAVIGATION_SELF_TEST:MISSING")
-            case let .failed(message): print("ITERM_NAVIGATION_SELF_TEST:FAILED:\(message)")
+            Task {
+                let result = await ITermNavigator().reveal(
+                    TerminalTarget(sessionID: "__NOTURCODE_NONEXISTENT_SESSION__")
+                )
+                switch result {
+                case .revealed: print("ITERM_NAVIGATION_SELF_TEST:REVEALED")
+                case .missing: print("ITERM_NAVIGATION_SELF_TEST:MISSING")
+                case let .failed(message): print("ITERM_NAVIGATION_SELF_TEST:FAILED:\(message)")
+                }
+                NSApplication.shared.terminate(nil)
             }
-            NSApplication.shared.terminate(nil)
             return
         }
 

@@ -5,8 +5,7 @@ import NoturcodeCore
 
 /// Rebinds a live agent process to its current iTerm pane without selecting,
 /// activating, writing to, moving, or closing any terminal session.
-@MainActor
-final class ITermSessionResolver {
+actor ITermSessionResolver {
     private let compiledScript: NSAppleScript?
 
     init() {

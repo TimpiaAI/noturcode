@@ -322,22 +322,8 @@ public enum HookNormalizer {
             || normalized.contains("elicitation")
     }
 
-    private static func terminalIdentity(environment: [String: String], sourceProcessID: Int32?) -> String? {
-        if let iTermSession = environment["TERM_SESSION_ID"], !iTermSession.isEmpty {
-            return iTermSession
-        }
-        let program = environment["TERM_PROGRAM"]
-            ?? environment["LC_TERMINAL"]
-            ?? environment["TERMINAL_EMULATOR"]
-            ?? "terminal"
-        let tty = environment["TTY"] ?? environment["SSH_TTY"]
-        if let tty, !tty.isEmpty {
-            return "terminal:\(program):\(tty)"
-        }
-        if let sourceProcessID, sourceProcessID > 0 {
-            return "terminal:\(program):pid-\(sourceProcessID)"
-        }
-        return nil
+    public static func terminalIdentity(environment: [String: String], sourceProcessID: Int32?) -> String? {
+        TerminalIdentity.capture(environment: environment, sourceProcessID: sourceProcessID)?.sessionID
     }
 
     public static func activityDescription(for toolName: String, payload: JSONValue? = nil) -> String {

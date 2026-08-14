@@ -50,6 +50,10 @@ public enum AgentTranscriptParser {
             guard let lineData = lineText.data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else { continue }
             let recordID = stableRecordID(object: object, line: lineText)
+            if object["type"] as? String == "noturcode_native" {
+                parseNative(object, recordID: recordID, entries: &entries)
+                continue
+            }
             switch source {
             case .claude:
                 parseClaude(object, recordID: recordID, entries: &entries, toolIndexes: &toolIndexes)
@@ -70,6 +74,31 @@ public enum AgentTranscriptParser {
         let recentIDs = Set(entries.suffix(boundedLimit).map(\.id))
         let conversationIDs = Set(entries.filter { $0.kind == .user || $0.kind == .assistant }.suffix(20).map(\.id))
         return entries.filter { recentIDs.contains($0.id) || conversationIDs.contains($0.id) }
+    }
+
+    private static func parseNative(
+        _ object: [String: Any],
+        recordID: String,
+        entries: inout [ChatTranscriptEntry]
+    ) {
+        guard let rawKind = object["kind"] as? String,
+              let kind = ChatTranscriptKind(rawValue: rawKind),
+              let text = object["text"] as? String else { return }
+        let entry = ChatTranscriptEntry(
+            id: object["id"] as? String ?? recordID,
+            kind: kind,
+            title: object["title"] as? String,
+            text: text,
+            detail: object["detail"] as? String,
+            timestamp: date(object["timestamp"]),
+            imagePaths: object["imagePaths"] as? [String] ?? imagePaths(in: text),
+            model: object["model"] as? String
+        )
+        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
+            entries[index] = entry
+        } else {
+            entries.append(entry)
+        }
     }
 
     private static func parseClaude(

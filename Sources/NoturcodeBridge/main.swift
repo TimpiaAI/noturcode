@@ -208,10 +208,10 @@ struct NoturcodeBridgeMain {
         writeStandardOutput("app: \(appPath ?? "not found")\n")
         writeStandardOutput("automatic-launch: \(automaticLaunchStatus)\n")
         let environment = ProcessInfo.processInfo.environment
-        let terminal = environment["TERM_SESSION_ID"] == nil
-            ? (environment["TERM_PROGRAM"] ?? environment["LC_TERMINAL"] ?? "generic")
-            : "iTerm2"
-        writeStandardOutput("terminal: \(terminal)\n")
+        let identity = TerminalIdentity.capture(environment: environment, sourceProcessID: ProcessAncestry.agentProcessID())
+        let terminal = identity?.application.displayName ?? "generic"
+        let multiplexer = identity?.multiplexer.map { " (\($0.rawValue))" } ?? ""
+        writeStandardOutput("terminal: \(terminal)\(multiplexer)\n")
     }
 
     private static func runAskSelection(arguments: [String]) {
@@ -303,12 +303,7 @@ struct NoturcodeBridgeMain {
 
     private static func terminalIdentity() -> String? {
         let environment = ProcessInfo.processInfo.environment
-        if let id = environment["TERM_SESSION_ID"], !id.isEmpty { return id }
-        let program = environment["TERM_PROGRAM"] ?? environment["LC_TERMINAL"] ?? "terminal"
-        if let tty = environment["TTY"] ?? environment["SSH_TTY"], !tty.isEmpty {
-            return "terminal:\(program):\(tty)"
-        }
-        return "terminal:\(program):pid-\(getppid())"
+        return TerminalIdentity.capture(environment: environment, sourceProcessID: getppid())?.sessionID
     }
 
     private static func option(_ name: String, in arguments: [String]) -> String? {

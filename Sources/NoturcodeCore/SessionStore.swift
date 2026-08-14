@@ -1,6 +1,38 @@
 import Combine
 import Foundation
 
+private final class SessionPersistenceDebouncer: @unchecked Sendable {
+    private let persistence: SessionPersistence
+    private let queue = DispatchQueue(label: "ro.noturcode.session-persistence", qos: .utility)
+    private let lock = NSLock()
+    private var pendingSave: DispatchWorkItem?
+
+    init(persistence: SessionPersistence) {
+        self.persistence = persistence
+    }
+
+    func schedule(_ sessions: [TrackedSession]) {
+        lock.lock()
+        pendingSave?.cancel()
+        let item = DispatchWorkItem { [persistence] in try? persistence.save(sessions) }
+        pendingSave = item
+        lock.unlock()
+        queue.asyncAfter(deadline: .now() + .milliseconds(180), execute: item)
+    }
+
+    func saveNow(_ sessions: [TrackedSession]) {
+        lock.lock()
+        pendingSave?.cancel()
+        pendingSave = nil
+        lock.unlock()
+        queue.async { [persistence] in try? persistence.save(sessions) }
+    }
+
+    func flush() {
+        queue.sync {}
+    }
+}
+
 @MainActor
 public final class SessionStore: ObservableObject {
     @Published public private(set) var sessions: [TrackedSession]
@@ -8,9 +40,11 @@ public final class SessionStore: ObservableObject {
 
     public var transitionHandler: ((SessionTransition) -> Void)?
     private let persistence: SessionPersistence
+    private let persistenceDebouncer: SessionPersistenceDebouncer
 
     public init(persistence: SessionPersistence = SessionPersistence()) {
         self.persistence = persistence
+        self.persistenceDebouncer = SessionPersistenceDebouncer(persistence: persistence)
         self.sessions = persistence.load().sorted { $0.lastPromptAt > $1.lastPromptAt }
     }
 
@@ -22,19 +56,23 @@ public final class SessionStore: ObservableObject {
 
         switch event.kind {
         case .connect:
-            guard let name = Self.normalizedSessionName(event.name),
-                  let terminalSessionID = event.terminalSessionID,
-                  !terminalSessionID.isEmpty else { return nil }
+            guard let name = Self.normalizedSessionName(event.name) else { return nil }
+            let terminal = event.terminalSessionID
+                .flatMap { $0.isEmpty ? nil : TerminalTarget(sessionID: $0) }
+                ?? old?.terminal
+            let nativeSession = event.nativeSession ?? old?.nativeSession
+            guard terminal != nil || nativeSession != nil else { return nil }
             let session = TrackedSession(
                 key: key,
                 name: name,
-                terminal: TerminalTarget(sessionID: terminalSessionID),
+                terminal: terminal,
+                nativeSession: nativeSession,
                 sourceProcessID: event.sourceProcessID,
                 cwd: event.cwd,
                 transcriptPath: event.transcriptPath ?? old?.transcriptPath,
                 state: old?.state ?? .idle,
                 connectedAt: old?.connectedAt ?? event.timestamp,
-                lastPromptAt: event.timestamp,
+                lastPromptAt: old?.lastPromptAt ?? event.timestamp,
                 stateChangedAt: old?.stateChangedAt ?? event.timestamp,
                 lastAgentMessage: old?.lastAgentMessage,
                 tokens: old?.tokens,
@@ -58,12 +96,34 @@ public final class SessionStore: ObservableObject {
             upsert(session)
 
         case .sessionStarted:
-            guard var session = session(at: index) else { return nil }
+            guard var session = session(at: index) else {
+                let terminal = event.terminalSessionID
+                    .flatMap { $0.isEmpty ? nil : TerminalTarget(sessionID: $0) }
+                guard terminal != nil || event.nativeSession != nil else { return nil }
+                let name = Self.normalizedSessionName(event.name)
+                    ?? Self.inferredSessionName(cwd: event.cwd, source: event.source)
+                let newSession = TrackedSession(
+                    key: key,
+                    name: name,
+                    terminal: terminal,
+                    nativeSession: event.nativeSession,
+                    sourceProcessID: event.sourceProcessID,
+                    cwd: event.cwd,
+                    transcriptPath: event.transcriptPath,
+                    state: .idle,
+                    connectedAt: event.timestamp,
+                    lastPromptAt: event.timestamp,
+                    stateChangedAt: event.timestamp
+                )
+                upsert(newSession)
+                break
+            }
             session.sourceProcessID = event.sourceProcessID ?? session.sourceProcessID
             session.transcriptPath = event.transcriptPath ?? session.transcriptPath
             if let terminal = event.terminalSessionID, !terminal.isEmpty {
                 session.terminal = TerminalTarget(sessionID: terminal)
             }
+            session.nativeSession = event.nativeSession ?? session.nativeSession
             upsert(session)
 
         case .promptSubmitted:
@@ -161,7 +221,7 @@ public final class SessionStore: ObservableObject {
         }
 
         sortSessions()
-        try? persistence.save(sessions)
+        persist(sessions, eventKind: event.kind)
         let current = sessions.first(where: { $0.key == key })
         let transition = SessionTransition(old: old, new: current, event: event)
         transitionHandler?(transition)
@@ -174,14 +234,14 @@ public final class SessionStore: ObservableObject {
         var session = sessions[index]
         session.terminal = target
         upsert(session)
-        try? persistence.save(sessions)
+        persistenceDebouncer.saveNow(sessions)
     }
 
     public func remove(_ key: SessionKey, staleMessage: String? = nil) {
         guard let index = sessions.firstIndex(where: { $0.key == key }) else { return }
         sessions.remove(at: index)
         lastStaleTargetMessage = staleMessage
-        try? persistence.save(sessions)
+        persistenceDebouncer.saveNow(sessions)
     }
 
     public func clearStaleMessage() {
@@ -190,6 +250,10 @@ public final class SessionStore: ObservableObject {
 
     public func showStaleMessage(_ message: String) {
         lastStaleTargetMessage = message
+    }
+
+    func flushPersistenceForTesting() {
+        persistenceDebouncer.flush()
     }
 
     public var sortedSessions: [TrackedSession] {
@@ -202,6 +266,15 @@ public final class SessionStore: ObservableObject {
             .lazy
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first(where: { !$0.isEmpty })
+    }
+
+    private static func inferredSessionName(cwd: String?, source: AgentSource) -> String {
+        if let cwd {
+            let name = URL(fileURLWithPath: cwd).lastPathComponent
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return name }
+        }
+        return source.displayName
     }
 
     private func session(at index: Int?) -> TrackedSession? {
@@ -226,6 +299,15 @@ public final class SessionStore: ObservableObject {
 
     private func sortSessions() {
         sessions.sort { $0.lastPromptAt > $1.lastPromptAt }
+    }
+
+    private func persist(_ snapshot: [TrackedSession], eventKind: BridgeEventKind) {
+        switch eventKind {
+        case .activityStarted, .activityFinished, .subagentStarted, .subagentActivity:
+            persistenceDebouncer.schedule(snapshot)
+        default:
+            persistenceDebouncer.saveNow(snapshot)
+        }
     }
 
     private func recordActivityStart(_ session: inout TrackedSession, label: String, at timestamp: Date) {

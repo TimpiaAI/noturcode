@@ -40,6 +40,7 @@ final class TerminalViewportWindowCoordinator {
             fallback: session,
             reader: model.transcriptReader,
             sender: model.promptSender,
+            nativeSessions: model.nativeSessions,
             resizeState: resizeState,
             onPreviewFile: { [weak model] url in
                 model?.filePreviews.show(url: url)
@@ -61,6 +62,12 @@ final class TerminalViewportWindowCoordinator {
         entries[key] = entry
         controller.showWindow(nil)
         window.orderFrontRegardless()
+    }
+
+    func closeAll() {
+        let openEntries = Array(entries.values)
+        entries.removeAll()
+        openEntries.forEach { $0.windowController.close() }
     }
 }
 
@@ -92,17 +99,18 @@ private final class TerminalWindowEntry: NSObject, NSWindowDelegate {
 
     func windowWillStartLiveResize(_ notification: Notification) {
         guard let view = windowController.window?.contentView else { return }
-        let image = NSImage(size: view.bounds.size)
-        image.lockFocus()
-        view.draw(view.bounds)
-        image.unlockFocus()
-        resizeState?.snapshot = image
-        resizeState?.isResizing = true
+        view.wantsLayer = true
+        view.layerContentsRedrawPolicy = .never
+        view.layer?.shouldRasterize = true
+        view.layer?.rasterizationScale = view.window?.backingScaleFactor ?? 2
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
-        resizeState?.isResizing = false
-        resizeState?.snapshot = nil
+        guard let view = windowController.window?.contentView else { return }
+        view.layer?.shouldRasterize = false
+        view.layerContentsRedrawPolicy = .onSetNeedsDisplay
+        view.needsLayout = true
+        view.needsDisplay = true
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -114,7 +122,8 @@ private struct TerminalViewportWindowView: View {
     @ObservedObject var store: SessionStore
     let fallback: TrackedSession
     let reader: AgentTranscriptReader
-    let sender: ITermPromptSender
+    let sender: SessionPromptRouter
+    let nativeSessions: NativeSessionCoordinator
     @ObservedObject var resizeState: TerminalLiveResizeState
     let onPreviewFile: (URL) -> Void
     let onClose: () -> Void
@@ -136,6 +145,7 @@ private struct TerminalViewportWindowView: View {
                         session: session,
                         reader: reader,
                         sender: sender,
+                        nativeSessions: nativeSessions,
                         onPreviewFile: onPreviewFile,
                         onClose: onClose
                     )
@@ -531,8 +541,13 @@ enum SyntaxHighlighter {
     private static let number = NSColor.systemOrange.blended(withFraction: 0.12, of: .white) ?? .systemOrange
     private static let comment = NSColor.white.withAlphaComponent(0.36)
     private static let key = NSColor.systemCyan.blended(withFraction: 0.12, of: .white) ?? .systemCyan
+    private static let cache = NSCache<NSString, NSAttributedString>()
 
     static func highlight(_ source: String, languageHint: String?) -> NSAttributedString {
+        cache.countLimit = 160
+        cache.totalCostLimit = 8 * 1_024 * 1_024
+        let cacheKey = NSString(string: "\(languageHint ?? "")\u{0}\(source)")
+        if let cached = cache.object(forKey: cacheKey) { return cached }
         let result = NSMutableAttributedString(
             string: source,
             attributes: [
@@ -548,6 +563,7 @@ enum SyntaxHighlighter {
         apply(#"(?m)(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"#, color: string, to: result, range: full)
         apply(#"(?m)^\s*\"[^\"\n]+\"(?=\s*:)"#, color: key, to: result, range: full)
         apply(#"(?m)(//.*$|#(?![0-9A-Fa-f]{3,8}\b).*$|/\*[\s\S]*?\*/)"#, color: comment, to: result, range: full)
+        cache.setObject(result, forKey: cacheKey, cost: source.utf8.count)
         return result
     }
 

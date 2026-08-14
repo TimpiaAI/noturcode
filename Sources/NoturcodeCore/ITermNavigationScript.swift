@@ -11,9 +11,12 @@ public enum ITermNavigationScript {
                     repeat with terminalSession in sessions of terminalTab
                         if (unique ID of terminalSession as text) is wantedID then
                             set targetWindowID to id of terminalWindow
+                            exit repeat
                         end if
                     end repeat
+                    if targetWindowID is not missing value then exit repeat
                 end repeat
+                if targetWindowID is not missing value then exit repeat
             end repeat
 
             if targetWindowID is missing value then return "MISSING"
@@ -26,7 +29,10 @@ public enum ITermNavigationScript {
             select targetWindow
             activate
             delay 0.03
-            set targetWindow to current window
+            -- Multiple iTerm windows can change front-to-back order during
+            -- activation. Reacquire the exact stable window id, never the
+            -- implicit current window.
+            set targetWindow to first window whose id is targetWindowID
 
             repeat with terminalTab in tabs of targetWindow
                 repeat with terminalSession in sessions of terminalTab

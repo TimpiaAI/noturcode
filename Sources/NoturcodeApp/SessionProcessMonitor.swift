@@ -5,6 +5,7 @@ import NoturcodeCore
 @MainActor
 final class SessionProcessMonitor {
     private var sources: [SessionKey: DispatchSourceProcess] = [:]
+    private var pendingWatchTokens: [SessionKey: UUID] = [:]
     private let onExit: @MainActor (SessionKey) -> Void
 
     init(onExit: @escaping @MainActor (SessionKey) -> Void) {
@@ -13,7 +14,20 @@ final class SessionProcessMonitor {
 
     func watch(key: SessionKey, pid: Int32) {
         unwatch(key: key)
-        guard pid > 1, processIsAlive(pid), processLooksLikeAgent(pid) else {
+        let token = UUID()
+        pendingWatchTokens[key] = token
+        Task.detached(priority: .utility) { [weak self] in
+            let isValid = pid > 1
+                && Self.processIsAlive(pid)
+                && Self.processLooksLikeAgent(pid)
+            await self?.finishWatch(key: key, pid: pid, token: token, isValid: isValid)
+        }
+    }
+
+    private func finishWatch(key: SessionKey, pid: Int32, token: UUID, isValid: Bool) {
+        guard pendingWatchTokens[key] == token else { return }
+        pendingWatchTokens[key] = nil
+        guard isValid else {
             onExit(key)
             return
         }
@@ -29,20 +43,22 @@ final class SessionProcessMonitor {
     }
 
     func unwatch(key: SessionKey) {
+        pendingWatchTokens[key] = nil
         sources[key]?.cancel()
         sources[key] = nil
     }
 
     func stop() {
+        pendingWatchTokens.removeAll()
         sources.values.forEach { $0.cancel() }
         sources.removeAll()
     }
 
-    private func processIsAlive(_ pid: Int32) -> Bool {
+    nonisolated private static func processIsAlive(_ pid: Int32) -> Bool {
         kill(pid, 0) == 0 || errno == EPERM
     }
 
-    private func processLooksLikeAgent(_ pid: Int32) -> Bool {
+    nonisolated private static func processLooksLikeAgent(_ pid: Int32) -> Bool {
         guard let ancestor = ProcessAncestry.inspect(pid: pid) else { return false }
         let name = URL(fileURLWithPath: ancestor.command).lastPathComponent.lowercased()
         return name.contains("codex") || name.contains("claude") || name == "node" || name == "bun"
