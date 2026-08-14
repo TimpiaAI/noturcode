@@ -1149,6 +1149,40 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
     }
 
+    func testExpandedNotchPreservesCompactHeaderAboveSessionDetails() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+
+        XCTAssertTrue(surface.contains("private var persistentDockHeader: some View"))
+        let stackStart = try XCTUnwrap(surface.range(of: "VStack(spacing: 0)"))
+        let headerDefinition = try XCTUnwrap(surface.range(of: "private var persistentDockHeader"))
+        let composition = String(surface[stackStart.lowerBound..<headerDefinition.lowerBound])
+        let header = try XCTUnwrap(composition.range(of: "persistentDockHeader"))
+        let details = try XCTUnwrap(composition.range(of: "expandedDetails"))
+        XCTAssertLessThan(header.lowerBound, details.lowerBound)
+        XCTAssertTrue(composition.contains("if state.isExpanded"))
+        XCTAssertTrue(composition.contains(".transition(coordinatedContentTransition)"))
+        XCTAssertTrue(surface.contains("+ metrics.dockRailHeight(sessionCount: store.sessions.count)"))
+        XCTAssertFalse(surface.contains("if state.isExpanded {\n                    expandedSurface\n                } else"))
+        XCTAssertFalse(surface.contains(".padding(.top, metrics.neckHeight + 9)"))
+    }
+
+    func testExpandedNotchSessionRowsDoNotRenderToolActivityInspector() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+
+        XCTAssertFalse(sessions.contains("private struct SessionActivityInspector"))
+        XCTAssertFalse(sessions.contains("activity-expand-"))
+        XCTAssertFalse(sessions.contains("activity-scroll-"))
+        XCTAssertFalse(sessions.contains("if isHovered || isActivityExpanded"))
+    }
+
     func testCompactPillShowsBrandAndEverySessionNameWithoutToolActivity() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1178,8 +1212,12 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("HStack(spacing: 6)"))
         XCTAssertFalse(surface.contains("ScrollView(.vertical, showsIndicators: false)"))
         XCTAssertTrue(surface.contains("Array(values.prefix(3))"))
+        XCTAssertTrue(surface.contains("let hiddenSessions = Array(values.dropFirst(3))"))
         XCTAssertTrue(surface.contains("let overflowCount = max(0, values.count - 3)"))
-        XCTAssertTrue(surface.contains("overflowChip(count: overflowCount, width: chipWidth)"))
+        XCTAssertTrue(surface.contains("overflowChip(sessions: hiddenSessions, width: chipWidth)"))
+        XCTAssertTrue(surface.contains("private func overflowState(for sessions: [TrackedSession]) -> SessionState"))
+        XCTAssertTrue(surface.contains("SessionMarble(") && surface.contains("name: \"More sessions\""))
+        XCTAssertTrue(surface.contains("Text(overflowState.displayName.lowercased())"))
         XCTAssertTrue(surface.contains(".frame(width: width, height: 30, alignment: .leading)"))
         XCTAssertTrue(surface.contains("onShowAll: { state.expand() }"))
         XCTAssertTrue(coordinator.contains("func expand()"))

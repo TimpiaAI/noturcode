@@ -289,13 +289,9 @@ struct ExpandedSessionList: View {
                                 now: .now,
                                 isHovered: state.hoveredSessionID == session.id,
                                 isPressed: state.pressedSessionID == session.id,
-                                isActivityExpanded: state.activityExpandedSessionID == session.id,
                                 isUnreadFinished: completionReads.isUnread(session),
                                 onHover: { hovering in
                                     state.setHoveredSession(hovering ? session.id : nil)
-                                },
-                                onToggleActivity: {
-                                    state.toggleActivityExpansion(for: session.id)
                                 },
                                 onViewTerminal: {
                                     model.showTerminalWindow(for: session)
@@ -371,124 +367,6 @@ struct ExpandedSessionList: View {
         }
     }
 
-}
-
-private struct RowActivity: Identifiable {
-    let id: String
-    let label: String
-    let startedAt: Date
-    let finishedAt: Date?
-    let tokens: Int?
-
-    var isActive: Bool { finishedAt == nil }
-}
-
-private struct SessionActivityInspector: View {
-    let session: TrackedSession
-    let now: Date
-    let isExpanded: Bool
-    let onToggleExpansion: () -> Void
-
-    private var activities: [RowActivity] {
-        let tools = session.toolActivities.map { activity in
-            RowActivity(
-                id: "tool-\(activity.id)",
-                label: activity.label,
-                startedAt: activity.startedAt,
-                finishedAt: activity.finishedAt,
-                tokens: nil
-            )
-        }
-        let agents = session.activeSubagents.map { agent in
-            RowActivity(
-                id: "agent-\(agent.id)",
-                label: agent.activity,
-                startedAt: agent.startedAt,
-                finishedAt: nil,
-                tokens: agent.tokens
-            )
-        }
-        return Array((tools + agents).sorted { $0.startedAt < $1.startedAt }.suffix(10))
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Rectangle()
-                .fill(.white.opacity(0.08))
-                .frame(height: 0.5)
-
-            HStack(spacing: 6) {
-                Text(session.name)
-                    .foregroundStyle(.white.opacity(0.62))
-                    .lineLimit(1)
-                Text("activity")
-                    .foregroundStyle(.white.opacity(0.30))
-                Spacer(minLength: 8)
-                if activities.count > 4 {
-                    Button(action: onToggleExpansion) {
-                        HStack(spacing: 3) {
-                            Text(isExpanded ? "Collapse" : "Expand")
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.54))
-                    .accessibilityIdentifier("activity-expand-\(session.id)")
-                }
-            }
-            .font(.system(size: 9.5, weight: .semibold))
-
-            if activities.isEmpty {
-                HStack(spacing: 6) {
-                    Circle().fill(.white.opacity(0.18)).frame(width: 5, height: 5)
-                    Text(session.currentActivity ?? "No recent tool activity")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .font(.system(size: 10.5, weight: .regular))
-                .foregroundStyle(.white.opacity(0.38))
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 5) {
-                        Color.clear
-                            .frame(width: 1, height: 1)
-                            .accessibilityElement()
-                            .accessibilityIdentifier("activity-scroll-\(session.id)")
-                        ForEach(activities) { activity in
-                            HStack(alignment: .firstTextBaseline, spacing: 7) {
-                                Circle()
-                                    .fill(.white.opacity(activity.isActive ? 0.66 : 0.28))
-                                    .frame(width: 5, height: 5)
-                                Text(activity.label)
-                                    .lineLimit(1)
-                                Spacer(minLength: 6)
-                                Text(DurationFormatting.compact(
-                                    from: activity.startedAt,
-                                    to: activity.finishedAt ?? now
-                                ))
-                                .monospacedDigit()
-                                if let tokens = activity.tokens {
-                                    Text("· \(DurationFormatting.tokens(tokens))")
-                                        .monospacedDigit()
-                                }
-                            }
-                            .font(.system(size: 10.5, weight: .regular))
-                            .foregroundStyle(.white.opacity(0.50))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .scrollIndicators(isExpanded ? .visible : .hidden)
-            }
-        }
-        .frame(height: isExpanded ? 190 : 78, alignment: .top)
-        .clipped()
-        .transaction { transaction in
-            transaction.animation = nil
-        }
-    }
 }
 
 private struct DoneSummaryPreview: View {
@@ -649,10 +527,8 @@ private struct SessionRow: View {
     let now: Date
     let isHovered: Bool
     let isPressed: Bool
-    let isActivityExpanded: Bool
     let isUnreadFinished: Bool
     let onHover: (Bool) -> Void
-    let onToggleActivity: () -> Void
     let onViewTerminal: () -> Void
     let onDisconnect: () -> Void
     let onSelect: () -> Void
@@ -800,17 +676,6 @@ private struct SessionRow: View {
                     .foregroundStyle(.white.opacity(0.43))
                     .padding(.leading, 31)
 
-                if isHovered || isActivityExpanded {
-                    SessionActivityInspector(
-                        session: session,
-                        now: now,
-                        isExpanded: isActivityExpanded,
-                        onToggleExpansion: onToggleActivity
-                    )
-                    .padding(.leading, 31)
-                    .transition(.opacity)
-                }
-
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 9)
@@ -837,7 +702,6 @@ private struct SessionRow: View {
         .frame(maxWidth: .infinity)
         .onHover(perform: onHover)
         .animation(reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0), value: isHovered)
-        .animation(reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0), value: isActivityExpanded)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: isPressed)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isUnreadFinished)
         .accessibilityElement(children: .contain)

@@ -197,7 +197,7 @@ final class NoturcodeUITests: XCTestCase {
         )
     }
 
-    func testHoverShowsUsefulActivityAndButtonOpensPersistentTerminal() throws {
+    func testHoverKeepsSessionNavigationCleanAndButtonOpensPersistentTerminal() throws {
         let stateURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-ui-spotlight-\(ProcessInfo.processInfo.processIdentifier).json")
         let fixture = """
@@ -243,21 +243,15 @@ final class NoturcodeUITests: XCTestCase {
         app.launchArguments = ["--background", "--ui-test-expanded", "--ui-test-hover-first"]
         app.launch()
 
-        let expand = app.descendants(matching: .any)["activity-expand-claude:ui-spotlight"].firstMatch
-        XCTAssertTrue(expand.waitForExistence(timeout: 3))
-        let activityScroll = app.descendants(matching: .any)["activity-scroll-claude:ui-spotlight"].firstMatch
-        XCTAssertTrue(activityScroll.exists)
-        XCTAssertLessThanOrEqual(activityScroll.frame.height, 68.5)
-        expand.click()
-        if activityScroll.frame.height <= 68 {
-            expand.click()
-        }
-        XCTAssertGreaterThan(activityScroll.frame.height, 68)
+        let sessionRow = app.descendants(matching: .any)["session-row-claude:ui-spotlight"].firstMatch
+        XCTAssertTrue(sessionRow.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.descendants(matching: .any)["activity-expand-claude:ui-spotlight"].firstMatch.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["activity-scroll-claude:ui-spotlight"].firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == 'done'")).firstMatch.exists)
         XCTAssertFalse(app.descendants(matching: .any)["session-spotlight"].firstMatch.exists)
 
         let activityAttachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        activityAttachment.name = "Noturcode hover activity without terminal overlay"
+        activityAttachment.name = "Noturcode hover session navigation without activity log"
         activityAttachment.lifetime = .keepAlways
         add(activityAttachment)
 
@@ -391,13 +385,11 @@ final class NoturcodeUITests: XCTestCase {
             .firstMatch
         XCTAssertTrue(firstRow.waitForExistence(timeout: 2))
         XCTAssertTrue(secondRow.exists)
-        let latestActivity = app.descendants(matching: .any)["activity-scroll-claude:hover-two"].firstMatch
-        XCTAssertTrue(latestActivity.waitForExistence(timeout: 4))
+        XCTAssertFalse(app.descendants(matching: .any)["activity-scroll-claude:hover-two"].firstMatch.exists)
         XCTAssertFalse(app.descendants(matching: .any)["activity-scroll-codex:hover-one"].firstMatch.exists)
-        XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "activity-scroll-claude:hover-two").count, 1)
 
         let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        attachment.name = "Activity expanded inside hovered session card"
+        attachment.name = "Rapid hover keeps session rows free of activity logs"
         attachment.lifetime = .keepAlways
         add(attachment)
     }

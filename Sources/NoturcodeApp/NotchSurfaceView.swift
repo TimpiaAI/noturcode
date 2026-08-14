@@ -26,6 +26,7 @@ struct NotchSurfaceView: View {
             return min(
                 520,
                 metrics.expandedHeight(sessionCount: store.sessions.count)
+                    + metrics.dockRailHeight(sessionCount: store.sessions.count)
                     + state.activityHeightAdjustment(in: store.sessions)
             )
         }
@@ -53,19 +54,14 @@ struct NotchSurfaceView: View {
                         y: state.isExpanded ? 8 : 3
                     )
 
-                if state.isExpanded {
-                    expandedSurface
-                        .transition(coordinatedContentTransition)
-                } else {
-                    RestIndicatorView(
-                        sessions: store.sortedSessions,
-                        metrics: metrics,
-                        completionReads: model.completionReads,
-                        onShowAll: { state.expand() }
-                    )
-                        .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
-                        .transition(coordinatedContentTransition)
+                VStack(spacing: 0) {
+                    persistentDockHeader
+                    if state.isExpanded {
+                        expandedDetails
+                            .transition(coordinatedContentTransition)
+                    }
                 }
+                .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
 
             }
         }
@@ -85,16 +81,29 @@ struct NotchSurfaceView: View {
         )
     }
 
-    private var expandedSurface: some View {
+    private var persistentDockHeader: some View {
+        RestIndicatorView(
+            sessions: store.sortedSessions,
+            metrics: metrics,
+            completionReads: model.completionReads,
+            onShowAll: { state.expand() }
+        )
+        .frame(
+            width: surfaceWidth,
+            height: metrics.collapsedHeight(sessionCount: store.sessions.count),
+            alignment: .top
+        )
+    }
+
+    private var expandedDetails: some View {
         ExpandedSessionList(
             sessions: store.sortedSessions,
             staleMessage: store.lastStaleTargetMessage,
             model: model,
             state: state
         )
-        .padding(.top, metrics.neckHeight + 9)
         .padding(.bottom, 12)
-        .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     @ViewBuilder
@@ -239,6 +248,7 @@ private struct RestIndicatorView: View {
     private func sessionStrip(_ values: [TrackedSession]) -> some View {
         if !values.isEmpty {
             let visibleSessions = Array(values.prefix(3))
+            let hiddenSessions = Array(values.dropFirst(3))
             let overflowCount = max(0, values.count - 3)
             let chipWidth = values.map { metrics.sessionChipWidth(for: $0.name) }.max() ?? 50
             ScrollView(.horizontal, showsIndicators: false) {
@@ -248,7 +258,7 @@ private struct RestIndicatorView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.92)))
                     }
                     if overflowCount > 0 {
-                        overflowChip(count: overflowCount, width: chipWidth)
+                        overflowChip(sessions: hiddenSessions, width: chipWidth)
                     }
                 }
             }
@@ -284,13 +294,37 @@ private struct RestIndicatorView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func overflowChip(count: Int, width: CGFloat) -> some View {
-        Button(action: onShowAll) {
+    private func overflowState(for sessions: [TrackedSession]) -> SessionState {
+        if sessions.contains(where: { $0.state == .askingYou }) { return .askingYou }
+        if sessions.contains(where: { $0.state == .failed }) { return .failed }
+        if sessions.contains(where: { $0.state == .working }) { return .working }
+        if sessions.contains(where: { $0.state == .done }) { return .done }
+        return .idle
+    }
+
+    private func overflowChip(sessions: [TrackedSession], width: CGFloat) -> some View {
+        let count = sessions.count
+        let overflowState = overflowState(for: sessions)
+        let completionIsUnread = sessions.contains(where: { completionReads.isUnread($0) })
+        return Button(action: onShowAll) {
             HStack(spacing: 5) {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 9, weight: .bold))
-                Text("+\(count)")
-                    .font(.system(size: 10.5, weight: .semibold))
+                SessionMarble(
+                    name: "More sessions",
+                    state: overflowState,
+                    source: nil,
+                    size: 15,
+                    animate: true,
+                    completionIsUnread: completionIsUnread
+                )
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("+\(count)")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(overflowState.displayName.lowercased())
+                        .font(.system(size: 7, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.48))
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
             }
             .foregroundStyle(.white.opacity(0.66))
             .padding(.horizontal, 7)
@@ -305,7 +339,7 @@ private struct RestIndicatorView: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Show \(count) more connected sessions")
+        .accessibilityLabel("Show \(count) more connected sessions, \(overflowState.displayName.lowercased())")
     }
 }
 
