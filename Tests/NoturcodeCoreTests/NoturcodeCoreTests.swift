@@ -942,7 +942,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(URLComponents(url: try XCTUnwrap(target.revealURL), resolvingAgainstBaseURL: false)?.queryItems?.first?.value, "w0t1p2:ABC DEF")
     }
 
-    func testSessionDockMorphsInsideAStableEnvelopeAndRoutesPrimaryActions() throws {
+    func testSessionDockKeepsStableGeometryAndRoutesPrimaryActions() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -956,14 +956,9 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("state.select(session) { model.jump(to: session) }"))
         XCTAssertTrue(surface.contains(".scaleEffect(isHovered ? 1.12 : 1)"))
         XCTAssertTrue(surface.contains(".offset(y: isHovered ? -2 : 0)"))
-        XCTAssertTrue(surface.contains("ExpandedSessionList("))
-        XCTAssertTrue(surface.contains("state.isExpanded"))
-        XCTAssertTrue(surface.contains("accessibilityReduceMotion"))
-        XCTAssertTrue(coordinator.contains("static let expandDelayMilliseconds = 180"))
-        XCTAssertTrue(coordinator.contains("static let collapseGraceMilliseconds = 220"))
-        XCTAssertTrue(coordinator.contains("state.isExpanded"))
-        XCTAssertTrue(coordinator.contains("height = metrics.expandedDockHeight(sessionCount: sessionCount)"))
-        XCTAssertTrue(coordinator.contains("max(280, expandedHeight(sessionCount: sessionCount) + 110)"))
+        XCTAssertFalse(surface.contains("ExpandedSessionList("))
+        XCTAssertFalse(surface.contains("state.isExpanded"))
+        XCTAssertTrue(coordinator.contains("height = metrics.dockHeight"))
         XCTAssertTrue(coordinator.contains("var surfaceTopInset: CGFloat { 0 }"))
         XCTAssertFalse(coordinator.contains("try await Task.sleep(for: .milliseconds(230))"))
     }

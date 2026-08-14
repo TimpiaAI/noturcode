@@ -59,10 +59,6 @@ struct NotchMetrics: Equatable, Sendable {
         return min(520, max(180, topInset + CGFloat(sessionCount) * 92 + 12))
     }
 
-    func expandedDockHeight(sessionCount: Int) -> CGFloat {
-        min(envelopeHeight - 8, max(280, expandedHeight(sessionCount: sessionCount) + 110))
-    }
-
 }
 
 @MainActor
@@ -262,13 +258,13 @@ private final class AttentionAnnouncementPanelController {
 @MainActor
 final class NotchPresentationState: ObservableObject {
     @Published private(set) var isExpanded: Bool
-    @Published private(set) var isPrehover: Bool
     @Published private(set) var hoveredSessionID: String?
     @Published private(set) var pressedSessionID: String?
     @Published private(set) var activityExpandedSessionID: String?
     let isUITestSpotlight: Bool
     let isUITestRapidHover: Bool
 
+    private var isArmed = true
     private var pointerInside = false
     private let isUITestForcedExpanded: Bool
     private let isUITestActivityExpanded: Bool
@@ -277,58 +273,19 @@ final class NotchPresentationState: ObservableObject {
     private var hoverIntentTask: Task<Void, Never>?
     private var hoverClearTask: Task<Void, Never>?
 
-    static let expandDelayMilliseconds = 180
-    static let collapseGraceMilliseconds = 220
-
     init() {
         isUITestForcedExpanded = CommandLine.arguments.contains("--ui-test-expanded")
         isUITestSpotlight = CommandLine.arguments.contains("--ui-test-hover-first")
             || CommandLine.arguments.contains("--ui-test-live-transcript")
         isUITestRapidHover = CommandLine.arguments.contains("--ui-test-rapid-hover")
         isUITestActivityExpanded = CommandLine.arguments.contains("--ui-test-expanded-activity")
-        isExpanded = isUITestForcedExpanded
-        isPrehover = false
+        isExpanded = false
+        isArmed = false
     }
 
     func pointerMoved(inside: Bool) {
-        guard pointerInside != inside else { return }
         pointerInside = inside
-        if inside {
-            exitTask?.cancel()
-            exitTask = nil
-            guard !isExpanded else { return }
-
-            isPrehover = true
-            dwellTask?.cancel()
-            dwellTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .milliseconds(Int64(Self.expandDelayMilliseconds)))
-                } catch {
-                    return
-                }
-                guard let self, self.pointerInside else { return }
-                self.isPrehover = false
-                self.isExpanded = true
-                self.dwellTask = nil
-            }
-            return
-        }
-
-        dwellTask?.cancel()
-        dwellTask = nil
-        isPrehover = false
-        setHoveredSession(nil)
-        guard isExpanded, !isUITestForcedExpanded else { return }
-        exitTask?.cancel()
-        exitTask = Task { [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(Int64(Self.collapseGraceMilliseconds)))
-            } catch {
-                return
-            }
-            guard let self, !self.pointerInside else { return }
-            self.collapseImmediately()
-        }
+        if !inside { setHoveredSession(nil) }
     }
 
     func setHoveredSession(_ id: String?) {
@@ -392,7 +349,6 @@ final class NotchPresentationState: ObservableObject {
                 return
             }
             self?.pressedSessionID = nil
-            self?.collapseImmediately()
             // UI fixtures must never activate or manipulate a real iTerm2 window.
             if self?.isUITestForcedExpanded != true {
                 action()
@@ -401,20 +357,20 @@ final class NotchPresentationState: ObservableObject {
     }
 
     func dismiss() {
-        collapseImmediately()
+        setHoveredSession(nil)
     }
 
-    private func collapseImmediately() {
+    private func collapseAndLatch() {
         dwellTask?.cancel()
         dwellTask = nil
         exitTask?.cancel()
         exitTask = nil
         hoverClearTask?.cancel()
         hoverClearTask = nil
-        isPrehover = false
         isExpanded = false
         hoveredSessionID = nil
         activityExpandedSessionID = nil
+        isArmed = false
     }
 }
 
@@ -477,15 +433,8 @@ final class NotchPanelController {
         if hasAnnouncement {
             width = min(286, metrics.envelopeWidth - 16)
             height = metrics.neckHeight + 20
-        } else if state.isExpanded {
-            width = min(520, metrics.envelopeWidth - 12)
-            height = metrics.expandedDockHeight(sessionCount: sessionCount)
         } else {
-            let prehoverWidth: CGFloat = state.isPrehover ? 8 : 0
-            width = min(
-                metrics.envelopeWidth - 12,
-                max(390, metrics.dockWidth(sessionCount: sessionCount)) + prehoverWidth
-            )
+            width = min(metrics.envelopeWidth - 12, max(390, metrics.dockWidth(sessionCount: sessionCount)))
             height = metrics.dockHeight
         }
         let frame = CGRect(

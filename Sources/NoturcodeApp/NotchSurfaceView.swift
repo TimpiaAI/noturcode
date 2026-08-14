@@ -1,16 +1,14 @@
 import SwiftUI
 import NoturcodeCore
 
-/// A fixed AppKit envelope hosts both the compact dock and its hover-opened
-/// notch surface. Only SwiftUI content morphs, so WindowServer geometry stays
-/// stable while the visible surface grows down from the display edge.
+/// The always-available session dock. The AppKit envelope never changes size;
+/// only lightweight SwiftUI hover feedback is drawn inside it.
 struct NotchSurfaceView: View {
     let model: AppModel
     @ObservedObject var state: NotchPresentationState
     let metrics: NotchMetrics
 
     @ObservedObject private var store: SessionStore
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(model: AppModel, state: NotchPresentationState, metrics: NotchMetrics) {
         self.model = model
@@ -23,77 +21,21 @@ struct NotchSurfaceView: View {
         min(metrics.envelopeWidth - 12, max(390, metrics.dockWidth(sessionCount: store.sessions.count)))
     }
 
-    private var surfaceWidth: CGFloat {
-        if state.isExpanded { return min(520, metrics.envelopeWidth - 12) }
-        return min(metrics.envelopeWidth - 12, dockWidth + (state.isPrehover ? 8 : 0))
-    }
-
-    private var surfaceHeight: CGFloat {
-        guard state.isExpanded else { return metrics.dockHeight }
-        return metrics.expandedDockHeight(sessionCount: store.sessions.count)
-    }
-
-    private var morphAnimation: Animation? {
-        guard !reduceMotion else { return nil }
-        return .timingCurve(0.16, 1, 0.3, 1, duration: state.isExpanded ? 0.24 : 0.18)
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             if !store.sessions.isEmpty {
-                VStack(spacing: 0) {
-                    SessionDock(
-                        sessions: store.sortedSessions,
-                        metrics: metrics,
-                        width: surfaceWidth,
-                        showsHoverLabel: !state.isExpanded,
-                        hoveredSessionID: state.hoveredSessionID,
-                        completionReads: model.completionReads,
-                        onHover: state.setHoveredSession,
-                        onOpenWorkspace: model.showStatusWindow,
-                        onSelect: { session in
-                            state.select(session) { model.jump(to: session) }
-                        }
-                    )
-
-                    if state.isExpanded {
-                        Rectangle()
-                            .fill(.white.opacity(0.08))
-                            .frame(height: 0.5)
-                            .padding(.horizontal, 14)
-
-                        ExpandedSessionList(
-                            sessions: store.sortedSessions,
-                            staleMessage: store.lastStaleTargetMessage,
-                            model: model,
-                            state: state
-                        )
-                        .padding(.top, 7)
-                        .padding(.bottom, 10)
-                        .frame(height: max(0, surfaceHeight - metrics.dockHeight - 0.5))
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+                SessionDock(
+                    sessions: store.sortedSessions,
+                    metrics: metrics,
+                    width: dockWidth,
+                    hoveredSessionID: state.hoveredSessionID,
+                    completionReads: model.completionReads,
+                    onHover: state.setHoveredSession,
+                    onOpenWorkspace: model.showStatusWindow,
+                    onSelect: { session in
+                        state.select(session) { model.jump(to: session) }
                     }
-                }
-                .frame(width: surfaceWidth, height: surfaceHeight, alignment: .top)
-                .background {
-                    DockShelfShape(bottomRadius: state.isExpanded ? 19 : 13)
-                        .fill(metrics.hasHardwareNotch ? AnyShapeStyle(Color(red: 0.025, green: 0.029, blue: 0.038)) : AnyShapeStyle(.ultraThinMaterial))
-                        .overlay {
-                            DockShelfShape(bottomRadius: state.isExpanded ? 19 : 13)
-                                .fill(Color(red: 0.025, green: 0.029, blue: 0.038).opacity(metrics.hasHardwareNotch ? 0.98 : 0.90))
-                        }
-                        .overlay {
-                            DockShelfShape(bottomRadius: state.isExpanded ? 19 : 13)
-                                .stroke(.white.opacity(state.isExpanded ? 0.09 : 0.075), lineWidth: 0.7)
-                        }
-                }
-                .clipShape(DockShelfShape(bottomRadius: state.isExpanded ? 19 : 13))
-                .shadow(color: .black.opacity(state.isExpanded ? 0.30 : 0.22), radius: state.isExpanded ? 18 : 10, y: state.isExpanded ? 9 : 5)
-                .scaleEffect(state.isPrehover ? 1.006 : 1, anchor: .top)
-                .animation(morphAnimation, value: state.isExpanded)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: state.isPrehover)
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("session-dock")
+                )
             }
         }
         .offset(y: metrics.surfaceTopInset)
@@ -105,7 +47,6 @@ private struct SessionDock: View {
     let sessions: [TrackedSession]
     let metrics: NotchMetrics
     let width: CGFloat
-    let showsHoverLabel: Bool
     let hoveredSessionID: String?
     @ObservedObject var completionReads: CompletionReadStore
     let onHover: (String?) -> Void
@@ -158,9 +99,21 @@ private struct SessionDock: View {
         .padding(.horizontal, 10)
         .padding(.top, metrics.hasHardwareNotch ? metrics.neckHeight : 0)
         .frame(width: width, height: metrics.dockHeight)
+        .background {
+            DockShelfShape(bottomRadius: 13)
+                .fill(metrics.hasHardwareNotch ? AnyShapeStyle(Color(red: 0.025, green: 0.029, blue: 0.038)) : AnyShapeStyle(.ultraThinMaterial))
+                .overlay {
+                    DockShelfShape(bottomRadius: 13)
+                        .fill(Color(red: 0.025, green: 0.029, blue: 0.038).opacity(metrics.hasHardwareNotch ? 0.98 : 0.88))
+                }
+                .overlay {
+                    DockShelfShape(bottomRadius: 13)
+                        .stroke(.white.opacity(0.075), lineWidth: 0.7)
+                }
+        }
+        .shadow(color: .black.opacity(0.22), radius: 10, y: 5)
         .overlay(alignment: .top) {
-            if showsHoverLabel,
-               let hovered = visibleSessions.first(where: { $0.id == hoveredSessionID }) {
+            if let hovered = visibleSessions.first(where: { $0.id == hoveredSessionID }) {
                 DockSessionLabel(session: hovered)
                     .offset(y: metrics.dockHeight + 5)
                     .transition(.opacity)
@@ -169,6 +122,7 @@ private struct SessionDock: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Noturcode session dock, \(sessions.count) connected sessions")
+        .accessibilityIdentifier("session-dock")
     }
 }
 
@@ -242,11 +196,6 @@ private struct DockButtonStyle: ButtonStyle {
 
 struct DockShelfShape: Shape {
     var bottomRadius: CGFloat
-
-    var animatableData: CGFloat {
-        get { bottomRadius }
-        set { bottomRadius = newValue }
-    }
 
     func path(in rect: CGRect) -> Path {
         let radius = min(bottomRadius, rect.height / 2, rect.width / 4)
