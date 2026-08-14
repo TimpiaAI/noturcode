@@ -4,6 +4,8 @@ set -u
 support_dir="$HOME/Library/Application Support/Noturcode"
 bridge="$support_dir/bin/noturcode-bridge"
 remote_agent="$support_dir/remote/noturcode-agent.py"
+active_proxy_pid=""
+active_proxy_socket=""
 
 fail() {
   print -u2 -- "Noturcode: $1"
@@ -41,6 +43,34 @@ ensure_app() {
   fail "Noturcode.app did not start."
 }
 
+stop_proxy() {
+  if [[ -n "$active_proxy_pid" ]]; then
+    kill "$active_proxy_pid" 2>/dev/null || true
+    wait "$active_proxy_pid" 2>/dev/null || true
+    active_proxy_pid=""
+  fi
+  if [[ -n "$active_proxy_socket" ]]; then
+    rm -f -- "$active_proxy_socket"
+    active_proxy_socket=""
+  fi
+}
+
+start_proxy() {
+  local target_socket="$1"
+  local label="$2"
+  active_proxy_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-${label}-proxy-$$.sock"
+  "$remote_agent" proxy --listen "$active_proxy_socket" --target "$target_socket" &
+  active_proxy_pid=$!
+  local attempt
+  for attempt in {1..40}; do
+    [[ -S "$active_proxy_socket" ]] && return 0
+    kill -0 "$active_proxy_pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  stop_proxy
+  fail "Could not start the secure local SSH proxy."
+}
+
 read_host() {
   local value=""
   read "value?SSH host or alias: "
@@ -61,9 +91,11 @@ pair_host() {
   local_socket=$("$bridge" socket-path) || return 1
   code=$("$bridge" pair-code --host "$host") || return 1
   remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-pair-$$.sock"
+  start_proxy "$local_socket" pair || return 1
 
   step 1 "Copy the free helper to $host"
   if ! ssh "$host" 'umask 077; mkdir -p "$HOME/.local/bin"; cat > "$HOME/.local/bin/noturcode-agent"; chmod 700 "$HOME/.local/bin/noturcode-agent"' < "$remote_agent"; then
+    stop_proxy
     fail "Could not copy the helper to $host."
     return 1
   fi
@@ -72,12 +104,14 @@ pair_host() {
   if ! ssh -tt \
       -o ExitOnForwardFailure=yes \
       -o StreamLocalBindUnlink=yes \
-      -R "${remote_socket}:${local_socket}" \
+      -R "${remote_socket}:${active_proxy_socket}" \
       "$host" \
       "NOTURCODE_REMOTE_SOCKET='$remote_socket' \"\$HOME/.local/bin/noturcode-agent\" pair '$code' && \"\$HOME/.local/bin/noturcode-agent\" install"; then
+    stop_proxy
     fail "Pairing failed. Run nc and try again."
     return 1
   fi
+  stop_proxy
 
   step 3 "Ready. Run nc, then choose Open an SSH workspace."
 }
@@ -95,15 +129,19 @@ connect_host() {
   terminal_id=$("$bridge" terminal-id) || return 1
   remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-$$.sock"
   remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; exec \"\${SHELL:-/bin/sh}\" -l"
+  start_proxy "$local_socket" session || return 1
 
   step 1 "Open the encrypted tunnel"
   step 2 "Start the interactive shell on $host"
   step 3 "Run Claude, Codex, or Gemini. Use /nc NAME inside the agent."
-  exec ssh -tt \
+  ssh -tt \
     -o ExitOnForwardFailure=yes \
     -o StreamLocalBindUnlink=yes \
-    -R "${remote_socket}:${local_socket}" \
+    -R "${remote_socket}:${active_proxy_socket}" \
     "$host" "$remote_command"
+  local status=$?
+  stop_proxy
+  return "$status"
 }
 
 doctor() {

@@ -144,6 +144,34 @@ class RemoteAgentTests(unittest.TestCase):
         self.assertTrue(any("noturcode-agent" in command for command in commands))
         self.assertEqual(len(list(self.agent.BACKUP_DIR.rglob("settings.json"))), 1)
 
+    def test_local_proxy_frames_ssh_request_before_forwarding_to_app(self):
+        app_socket = self.root / "app.sock"
+        proxy_socket = self.root / "proxy.sock"
+        app_server = OneShotUnixServer(app_socket, {"ok": False, "error": "invalid code"})
+        app_server.start()
+        proxy_thread = threading.Thread(
+            target=self.agent.serve_proxy,
+            args=(str(proxy_socket), str(app_socket), 1),
+            daemon=True,
+        )
+        proxy_thread.start()
+        for _ in range(100):
+            if proxy_socket.exists():
+                break
+            threading.Event().wait(0.01)
+
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.settimeout(1)
+        client.connect(str(proxy_socket))
+        client.sendall(b'{"type":"remotePair","code":"000000"}\n')
+        response = json.loads(client.recv(4096).decode("utf-8"))
+        client.close()
+        proxy_thread.join(timeout=1)
+        app_server.join()
+
+        self.assertEqual(response["error"], "invalid code")
+        self.assertEqual(app_server.request["type"], "remotePair")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -140,6 +140,73 @@ def exchange(request: dict) -> dict:
         client.close()
 
 
+def _read_frame(connection: socket.socket) -> bytes:
+    payload = bytearray()
+    while len(payload) < 2_000_000:
+        chunk = connection.recv(16_384)
+        if not chunk:
+            break
+        payload.extend(chunk)
+        newline = payload.find(b"\n")
+        if newline >= 0:
+            return bytes(payload[:newline])
+    return bytes(payload)
+
+
+def _forward_frame(payload: bytes, target_path: str) -> bytes:
+    upstream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    upstream.settimeout(3.0)
+    try:
+        upstream.connect(target_path)
+        upstream.sendall(payload)
+        upstream.shutdown(socket.SHUT_WR)
+        chunks: list[bytes] = []
+        while True:
+            chunk = upstream.recv(4096)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        upstream.close()
+
+
+def serve_proxy(listen_path: str, target_path: str, max_connections: int | None = None) -> int:
+    listen = pathlib.Path(listen_path)
+    try:
+        status = listen.lstat()
+        if status.st_uid != os.getuid() or not stat.S_ISSOCK(status.st_mode):
+            raise RuntimeError(f"Refusing to replace unsafe proxy path: {listen}")
+        listen.unlink()
+    except FileNotFoundError:
+        pass
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    handled = 0
+    try:
+        server.bind(str(listen))
+        os.chmod(listen, 0o600)
+        server.listen(16)
+        while max_connections is None or handled < max_connections:
+            connection, _ = server.accept()
+            try:
+                request = _read_frame(connection)
+                response = _forward_frame(request, target_path)
+                connection.sendall(response)
+            except Exception as error:
+                connection.sendall(json.dumps({"ok": False, "error": str(error)}).encode("utf-8"))
+            finally:
+                connection.close()
+            handled += 1
+        return 0
+    finally:
+        server.close()
+        try:
+            listen.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def pair(code: str) -> int:
     identifier = device_id()
     response = exchange(
@@ -295,6 +362,10 @@ def build_parser() -> argparse.ArgumentParser:
     hook_parser.add_argument("--source", required=True, choices=("claude", "codex", "gemini"))
     commands.add_parser("install")
     commands.add_parser("doctor")
+    proxy_parser = commands.add_parser("proxy")
+    proxy_parser.add_argument("--listen", required=True)
+    proxy_parser.add_argument("--target", required=True)
+    proxy_parser.add_argument("--max-connections", type=int)
     return parser
 
 
@@ -308,6 +379,8 @@ def main() -> int:
         return install_hooks()
     if arguments.command == "doctor":
         return doctor()
+    if arguments.command == "proxy":
+        return serve_proxy(arguments.listen, arguments.target, arguments.max_connections)
     return 2
 
 
