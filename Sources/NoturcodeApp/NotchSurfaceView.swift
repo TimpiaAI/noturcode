@@ -102,7 +102,8 @@ struct NotchSurfaceView: View {
             let shape = NotchSilhouette(
                 neckWidth: min(metrics.neckWidth, width - 24),
                 neckHeight: metrics.neckHeight,
-                bottomRadius: state.isExpanded ? 18 : 14
+                bottomRadius: state.isExpanded ? 18 : 14,
+                topShoulderFill: 1
             )
             shape
                 .fill(Color.black)
@@ -136,12 +137,14 @@ struct NotchSilhouette: Shape {
     var neckWidth: CGFloat
     var neckHeight: CGFloat
     var bottomRadius: CGFloat
+    var topShoulderFill: CGFloat
 
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(neckWidth, neckHeight) }
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, CGFloat> {
+        get { AnimatablePair(AnimatablePair(neckWidth, neckHeight), topShoulderFill) }
         set {
-            neckWidth = newValue.first
-            neckHeight = newValue.second
+            neckWidth = newValue.first.first
+            neckHeight = newValue.first.second
+            topShoulderFill = newValue.second
         }
     }
 
@@ -152,15 +155,21 @@ struct NotchSilhouette: Shape {
         let shoulderY = min(rect.height - bottomRadius - 1, neckHeight + 8)
         let bottomY = rect.maxY
         let radius = min(bottomRadius, rect.width / 4, max(2, rect.height / 3))
+        let topShoulderFill = min(1, max(0, topShoulderFill))
+        let topLeft = neckLeft + (rect.minX - neckLeft) * topShoulderFill
+        let topRight = neckRight + (rect.maxX - neckRight) * topShoulderFill
+        let shoulderControlInset = 18 * (1 - topShoulderFill)
+        let shoulderControlRise = 8 * (1 - topShoulderFill)
+        let topSideBottomY = max(rect.minY, neckHeight - 7) * (1 - topShoulderFill)
 
         var path = Path()
-        path.move(to: CGPoint(x: neckLeft, y: rect.minY))
-        path.addLine(to: CGPoint(x: neckRight, y: rect.minY))
-        path.addLine(to: CGPoint(x: neckRight, y: max(rect.minY, neckHeight - 7)))
+        path.move(to: CGPoint(x: topLeft, y: rect.minY))
+        path.addLine(to: CGPoint(x: topRight, y: rect.minY))
+        path.addLine(to: CGPoint(x: topRight, y: topSideBottomY))
         path.addCurve(
             to: CGPoint(x: rect.maxX, y: shoulderY),
-            control1: CGPoint(x: neckRight, y: neckHeight + 4),
-            control2: CGPoint(x: rect.maxX - 18, y: shoulderY - 8)
+            control1: CGPoint(x: topRight, y: neckHeight + 4),
+            control2: CGPoint(x: rect.maxX - shoulderControlInset, y: shoulderY - shoulderControlRise)
         )
         path.addLine(to: CGPoint(x: rect.maxX, y: bottomY - radius))
         path.addQuadCurve(
@@ -174,10 +183,11 @@ struct NotchSilhouette: Shape {
         )
         path.addLine(to: CGPoint(x: rect.minX, y: shoulderY))
         path.addCurve(
-            to: CGPoint(x: neckLeft, y: max(rect.minY, neckHeight - 7)),
-            control1: CGPoint(x: rect.minX + 18, y: shoulderY - 8),
-            control2: CGPoint(x: neckLeft, y: neckHeight + 4)
+            to: CGPoint(x: topLeft, y: topSideBottomY),
+            control1: CGPoint(x: rect.minX + shoulderControlInset, y: shoulderY - shoulderControlRise),
+            control2: CGPoint(x: topLeft, y: neckHeight + 4)
         )
+        path.addLine(to: CGPoint(x: topLeft, y: rect.minY))
         path.closeSubpath()
         return path
     }
@@ -234,7 +244,6 @@ private struct RestIndicatorView: View {
                     }
                 }
             }
-            .scrollClipDisabled()
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -254,9 +263,9 @@ private struct RestIndicatorView: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .frame(width: metrics.sessionChipWidth(for: session.name), alignment: .leading)
         .padding(.horizontal, 7)
         .padding(.vertical, 6)
+        .frame(width: metrics.sessionChipWidth(for: session.name), alignment: .leading)
         .background(
             Capsule(style: .continuous)
                 .fill(.white.opacity(isPrimary ? 0.075 : 0.035))

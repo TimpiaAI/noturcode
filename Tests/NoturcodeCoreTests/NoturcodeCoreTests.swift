@@ -808,6 +808,19 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("height = metrics.collapsedHeight"))
     }
 
+    func testHardwareSurfaceAlwaysFillsTheTopShoulders() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let notch = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+
+        XCTAssertTrue(notch.contains("topShoulderFill: 1"))
+        XCTAssertFalse(notch.contains("topShoulderFill: state.isExpanded ? 1 : 0"))
+        XCTAssertTrue(notch.contains("let topLeft = neckLeft + (rect.minX - neckLeft) * topShoulderFill"))
+        XCTAssertTrue(notch.contains("let topRight = neckRight + (rect.maxX - neckRight) * topShoulderFill"))
+    }
+
     func testWorkflowAgentSelectionLoadsItsOwnConversation() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -865,8 +878,15 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(views.contains("private struct PromptTimeline: View"))
         XCTAssertTrue(views.contains("GeometryReader { geometry in"))
-        XCTAssertTrue(views.contains("geometry.size.height - 20"))
+        XCTAssertTrue(views.contains("let markerDiameter: CGFloat = 26"))
+        XCTAssertTrue(views.contains("geometry.size.height - markerDiameter"))
+        XCTAssertTrue(views.contains("railInset + progress * usableHeight"))
         XCTAssertTrue(views.contains("private struct PromptTimelineMarker: View"))
+        let markerStart = try XCTUnwrap(views.range(of: "private struct PromptTimelineMarker: View"))
+        let previewStart = try XCTUnwrap(views.range(of: "private struct PromptRailPreview: View"))
+        let marker = String(views[markerStart.lowerBound..<previewStart.lowerBound])
+        XCTAssertTrue(marker.contains(".fill(.white.opacity(isLatest ? 0.82 : 0.30))"))
+        XCTAssertFalse(marker.contains(".cyan"))
         XCTAssertTrue(views.contains(".popover(isPresented: $isPreviewPresented"))
         XCTAssertTrue(views.contains("try await Task.sleep(for: .milliseconds(280))"))
         XCTAssertTrue(views.contains("guard !isPointerOverPreview else { return }"))
@@ -1141,6 +1161,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains(".lineLimit(1)"))
         XCTAssertTrue(surface.contains(".frame(height: metrics.dockRailHeight)"))
         XCTAssertTrue(surface.contains(".frame(maxHeight: .infinity, alignment: .top)"))
+        XCTAssertFalse(surface.contains(".scrollClipDisabled()"))
         XCTAssertFalse(surface.contains("compactActivityText"))
         XCTAssertFalse(surface.contains("session.currentActivity"))
         XCTAssertTrue(surface.contains("metrics.collapsedWidth(sessionNames: store.sessions.map(\\.name))"))
@@ -1148,6 +1169,13 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("func collapsedWidth(sessionNames: [String])"))
         XCTAssertTrue(coordinator.contains("sessionNames.map(sessionChipWidth(for:)).reduce(0, +)"))
         XCTAssertFalse(coordinator.contains("CGFloat(sessionCount) * 88"))
+
+        let chipStart = try XCTUnwrap(surface.range(of: "private func sessionChip"))
+        let announcementStart = try XCTUnwrap(surface.range(of: "struct AnnouncementView"))
+        let chip = String(surface[chipStart.lowerBound..<announcementStart.lowerBound])
+        let padding = try XCTUnwrap(chip.range(of: ".padding(.horizontal, 7)"))
+        let measuredFrame = try XCTUnwrap(chip.range(of: ".frame(width: metrics.sessionChipWidth(for: session.name)"))
+        XCTAssertLessThan(padding.lowerBound, measuredFrame.lowerBound)
         XCTAssertFalse(coordinator.contains("max(340"))
     }
 

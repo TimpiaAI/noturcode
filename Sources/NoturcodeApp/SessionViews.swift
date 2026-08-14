@@ -1902,12 +1902,14 @@ private struct PromptTimeline: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let usableHeight = max(0, geometry.size.height - 20)
+            let markerDiameter: CGFloat = 26
+            let railInset = markerDiameter / 2
+            let usableHeight = max(0, geometry.size.height - markerDiameter)
             ZStack(alignment: .top) {
                 Capsule()
                     .fill(.white.opacity(0.105))
                     .frame(width: 1, height: usableHeight)
-                    .offset(y: 10)
+                    .offset(y: railInset)
 
                 ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                     let progress = entries.count <= 1 ? 1 : CGFloat(index) / CGFloat(entries.count - 1)
@@ -1918,7 +1920,7 @@ private struct PromptTimeline: View {
                         fallbackModel: fallbackModel,
                         onSelect: onSelect
                     )
-                    .offset(y: progress * usableHeight)
+                    .offset(y: railInset + progress * usableHeight)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1944,7 +1946,7 @@ private struct PromptTimelineMarker: View {
             onSelect(entry)
         } label: {
             Circle()
-                .fill(.cyan.opacity(isLatest ? 0.90 : 0.36))
+                .fill(.white.opacity(isLatest ? 0.82 : 0.30))
                 .frame(width: isLatest ? 8 : 6, height: isLatest ? 8 : 6)
                 .overlay(Circle().stroke(.black.opacity(0.70), lineWidth: 2))
                 .frame(width: 26, height: 26)
