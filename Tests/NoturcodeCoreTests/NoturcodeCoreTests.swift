@@ -664,6 +664,44 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(status.contains("Rectangle().fill(.white.opacity(0.075)).frame(width: 1)"))
     }
 
+    func testDesktopConversationChromeUsesBalancedPaddingAndInteractiveControls() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let status = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/StatusWindowController.swift"))
+        let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+
+        XCTAssertTrue(status.contains("private struct DesktopHeaderControl"))
+        XCTAssertTrue(status.contains("private struct ShellPressButtonStyle"))
+        XCTAssertTrue(status.contains(".padding(.top, 22)"))
+        XCTAssertTrue(status.contains(".padding(.bottom, 8)"))
+        XCTAssertFalse(status.contains(".padding(.top, 25)"))
+        XCTAssertTrue(status.contains("reduceMotion ? .easeOut(duration: 0.08) : .smooth(duration: 0.20)"))
+
+        XCTAssertTrue(sessions.contains("Label(conversationTitle, systemImage: \"bubble.left.and.bubble.right\")"))
+        XCTAssertTrue(sessions.contains("private struct ConversationSidebarToggle"))
+        XCTAssertTrue(sessions.contains(".frame(height: presentation == .desktop ? 30 : nil)"))
+        XCTAssertTrue(sessions.contains(".padding(.horizontal, presentation == .desktop ? 8 : 0)"))
+        XCTAssertTrue(sessions.contains("reduceMotion ? nil : .smooth(duration: 0.20)"))
+    }
+
+    func testSocketAcknowledgementWaitsForSessionPersistence() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let appModel = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+
+        XCTAssertTrue(appModel.contains("let applicationCompleted = DispatchSemaphore(value: 0)"))
+        XCTAssertTrue(appModel.contains("applicationCompleted.signal()"))
+        XCTAssertTrue(appModel.contains("applicationCompleted.wait(timeout: .now() + 1.5) == .success"))
+        XCTAssertTrue(appModel.contains("return Data(\"{\\\"ok\\\":true}\".utf8)"))
+        XCTAssertTrue(bridge.contains("guard responseAcknowledgesPersistence(response)"))
+        XCTAssertTrue(bridge.contains("private static func responseAcknowledgesPersistence"))
+    }
+
     func testAppDisconnectRemovesOnlyNoturcodeTracking() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1070,7 +1108,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(status.contains("sessionSection(\"Working\""))
         XCTAssertTrue(status.contains("sessionSection(\"Recent\""))
         XCTAssertTrue(status.contains("accessibilityIdentifier(\"desktop-session-sidebar\")"))
-        XCTAssertTrue(status.contains("accessibilityIdentifier(\"toggle-desktop-session-sidebar\")"))
+        XCTAssertTrue(status.contains("identifier: \"toggle-desktop-session-sidebar\""))
         XCTAssertTrue(status.contains("noturcode.full-app-shell-v2-sized"))
         XCTAssertTrue(status.contains("max(1_240, visible.width * 0.88)"))
         XCTAssertFalse(status.contains("navigationRail"))

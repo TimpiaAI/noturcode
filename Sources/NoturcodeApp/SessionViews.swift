@@ -846,6 +846,51 @@ private struct SessionRow: View {
     }
 }
 
+private struct ConversationSidebarToggle: View {
+    let isExpanded: Bool
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label("Workflow", systemImage: "sidebar.trailing")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(.white.opacity(isExpanded ? 0.72 : (isHovered ? 0.62 : 0.42)))
+                .padding(.horizontal, 8)
+                .frame(height: 24)
+                .background(
+                    .white.opacity(isExpanded ? 0.075 : (isHovered ? 0.060 : 0.025)),
+                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(.white.opacity(isHovered || isExpanded ? 0.09 : 0.04), lineWidth: 0.7)
+                }
+        }
+        .buttonStyle(ConversationControlButtonStyle(reduceMotion: reduceMotion))
+        .onHover { hovering in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.10)) {
+                isHovered = hovering
+            }
+        }
+        .help(isExpanded ? "Hide workflow" : "Show workflow")
+        .accessibilityLabel(isExpanded ? "Hide workflow" : "Show workflow")
+    }
+}
+
+private struct ConversationControlButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .opacity(configuration.isPressed ? 0.84 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
+    }
+}
+
 struct TerminalViewportContent: View {
     let session: TrackedSession
     let reader: AgentTranscriptReader
@@ -854,6 +899,7 @@ struct TerminalViewportContent: View {
     let onClose: (() -> Void)?
     let presentation: TerminalViewportPresentation
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var transcriptEntries: [ChatTranscriptEntry] = []
     @State private var optimisticEntries: [ChatTranscriptEntry] = []
     @State private var selectedAgentConversationEntries: [ChatTranscriptEntry] = []
@@ -956,6 +1002,10 @@ struct TerminalViewportContent: View {
         let id = session.terminal.uniqueID
         guard id.count > 8 else { return "Local session · \(id)" }
         return "Local session · …\(id.suffix(8))"
+    }
+
+    private var conversationTitle: String {
+        selectedSubagent.map { "\($0.type) conversation" } ?? "Conversation"
     }
 
     var body: some View {
@@ -1064,27 +1114,32 @@ struct TerminalViewportContent: View {
                     Circle()
                         .fill(displayedTranscriptEntries.isEmpty ? Color.white.opacity(0.28) : Color.green.opacity(0.75))
                         .frame(width: 5, height: 5)
-                    Text(selectedSubagent.map { "\($0.type) conversation" } ?? "Conversation")
+                    Label(conversationTitle, systemImage: "bubble.left.and.bubble.right")
                     Spacer(minLength: 8)
                     Text(displayedTranscriptEntries.isEmpty ? "waiting for transcript" : "local · live")
                         .foregroundStyle(.white.opacity(0.30))
                     if presentation == .desktop {
-                        Button {
-                            withAnimation(.easeOut(duration: 0.16)) {
+                        ConversationSidebarToggle(isExpanded: isSidebarVisible) {
+                            withAnimation(reduceMotion ? nil : .smooth(duration: 0.20)) {
                                 isSidebarVisible.toggle()
                                 if !isSidebarVisible { selectedToolEntryID = nil }
                             }
-                        } label: {
-                            Label(isSidebarVisible ? "Hide workflow" : "Workflow", systemImage: "sidebar.trailing")
-                                .font(.system(size: 9, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.42))
                         }
-                        .buttonStyle(.plain)
                         .accessibilityIdentifier("toggle-desktop-workflow")
                     }
                 }
                 .font(.system(size: 9.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.48))
+                .padding(.horizontal, presentation == .desktop ? 8 : 0)
+                .frame(height: presentation == .desktop ? 30 : nil)
+                .background(
+                    presentation == .desktop ? Color.white.opacity(0.026) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(.white.opacity(presentation == .desktop ? 0.045 : 0), lineWidth: 0.7)
+                }
 
                 ScrollViewReader { proxy in
                     HStack(spacing: 3) {
@@ -1229,7 +1284,7 @@ struct TerminalViewportContent: View {
             }
             .frame(maxHeight: .infinity)
             .animation(.easeOut(duration: 0.14), value: selectedToolEntryID)
-            .animation(.easeInOut(duration: 0.16), value: isSidebarVisible)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.20), value: isSidebarVisible)
 
             if selectedSubagent == nil {
                 composerSurface

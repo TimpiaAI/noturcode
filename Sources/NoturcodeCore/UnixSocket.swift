@@ -185,7 +185,7 @@ public enum UnixSocketClient {
         var noSigPipe: Int32 = 1
         setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
 
-        var timeout = timeval(tv_sec: 1, tv_usec: 0)
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
         setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var address = try socketAddress(path: path)
         let result = withSockAddr(&address) { Darwin.connect(descriptor, $0, $1) }

@@ -71,6 +71,7 @@ final class StatusWindowController: NSWindowController, NSWindowDelegate {
 
 private struct StatusOverviewView: View {
     let model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject private var store: SessionStore
     @ObservedObject private var loginItem: LoginItemController
     @ObservedObject private var completionReads: CompletionReadStore
@@ -106,6 +107,9 @@ private struct StatusOverviewView: View {
     private var settledSessions: [TrackedSession] {
         filteredSessions.filter { !attentionSessions.contains($0) && !activeSessions.contains($0) }
     }
+    private var shellMotion: Animation? {
+        reduceMotion ? .easeOut(duration: 0.08) : .smooth(duration: 0.20)
+    }
 
     var body: some View {
         HStack(spacing: -14) {
@@ -117,7 +121,7 @@ private struct StatusOverviewView: View {
         }
         .background(Color(red: 0.020, green: 0.022, blue: 0.028))
         .frame(minWidth: 980, minHeight: 640)
-        .animation(.easeOut(duration: 0.16), value: isSidebarVisible)
+        .animation(shellMotion, value: isSidebarVisible)
         .onAppear { if selectedSessionID == nil { selectedSessionID = sessions.first?.id } }
         .onChange(of: sessions.map(\.id)) { _, ids in
             if selectedSessionID == nil || !ids.contains(selectedSessionID ?? "") {
@@ -228,8 +232,10 @@ private struct StatusOverviewView: View {
     private func sessionSidebarRow(_ session: TrackedSession) -> some View {
         let selected = selectedSession?.id == session.id
         return Button {
-            selectedSessionID = session.id
-            completionReads.markSeen(session)
+            withAnimation(shellMotion) {
+                selectedSessionID = session.id
+                completionReads.markSeen(session)
+            }
         } label: {
             HStack(spacing: 9) {
                 SessionMarble(session: session, size: 22, animate: selected)
@@ -283,16 +289,16 @@ private struct StatusOverviewView: View {
     }
 
     private func workspaceHeader(_ session: TrackedSession) -> some View {
-        HStack(spacing: 10) {
-            Button { isSidebarVisible.toggle() } label: {
-                Image(systemName: "sidebar.leading")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 26, height: 26)
+        HStack(spacing: 9) {
+            DesktopHeaderControl(
+                title: isSidebarVisible ? "Hide sessions" : "Show sessions",
+                icon: "sidebar.leading",
+                showsTitle: false,
+                isActive: !isSidebarVisible,
+                identifier: "toggle-desktop-session-sidebar"
+            ) {
+                withAnimation(shellMotion) { isSidebarVisible.toggle() }
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.white.opacity(0.48))
-            .help(isSidebarVisible ? "Hide sessions" : "Show sessions")
-            .accessibilityIdentifier("toggle-desktop-session-sidebar")
 
             SessionMarble(session: session, size: 20, animate: false)
             VStack(alignment: .leading, spacing: 1) {
@@ -316,25 +322,23 @@ private struct StatusOverviewView: View {
                 StatusWindowController.shared.toggleFullScreen()
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.top, 25)
-        .frame(height: 58)
+        .padding(.horizontal, 12)
+        .padding(.top, 22)
+        .padding(.bottom, 8)
+        .frame(minHeight: 58)
         .background(Color(red: 0.047, green: 0.050, blue: 0.059))
     }
 
     private func headerAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         let identifier = "header-action-" + title.lowercased().replacingOccurrences(of: " ", with: "-")
-        return Button(action: action) {
-            Label(title, systemImage: icon)
-                .font(.system(size: 9.5, weight: .semibold))
-                .padding(.horizontal, 9)
-                .frame(height: 27)
-                .background(.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 7))
-        }
-        .buttonStyle(.plain)
-        .foregroundStyle(.white.opacity(0.58))
-        .accessibilityLabel(title)
-        .accessibilityIdentifier(identifier)
+        return DesktopHeaderControl(
+            title: title,
+            icon: icon,
+            showsTitle: true,
+            isActive: false,
+            identifier: identifier,
+            action: action
+        )
     }
 
     private var emptyState: some View {
@@ -355,5 +359,61 @@ private struct StatusOverviewView: View {
             get: { loginItem.status == .enabled || loginItem.status == .requiresApproval },
             set: { loginItem.setEnabled($0) }
         )
+    }
+}
+
+private struct DesktopHeaderControl: View {
+    let title: String
+    let icon: String
+    let showsTitle: Bool
+    let isActive: Bool
+    let identifier: String
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 10, weight: .semibold))
+                if showsTitle {
+                    Text(title)
+                        .font(.system(size: 9.5, weight: .semibold))
+                }
+            }
+            .padding(.horizontal, showsTitle ? 9 : 0)
+            .frame(width: showsTitle ? nil : 28, height: 28)
+            .foregroundStyle(.white.opacity(isActive ? 0.88 : (isHovered ? 0.78 : 0.52)))
+            .background(
+                .white.opacity(isActive ? 0.10 : (isHovered ? 0.075 : 0.035)),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(.white.opacity(isHovered || isActive ? 0.11 : 0.055), lineWidth: 0.7)
+            }
+        }
+        .buttonStyle(ShellPressButtonStyle(reduceMotion: reduceMotion))
+        .onHover { hovering in
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.10)) {
+                isHovered = hovering
+            }
+        }
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier(identifier)
+    }
+}
+
+private struct ShellPressButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.82 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }

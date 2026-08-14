@@ -105,8 +105,13 @@ final class AppModel: ObservableObject {
                   envelope.version == BridgeEnvelope.currentVersion else {
                 return Data("{\"ok\":false}".utf8)
             }
+            let applicationCompleted = DispatchSemaphore(value: 0)
             Task { @MainActor in
                 self?.receive(envelope.event)
+                applicationCompleted.signal()
+            }
+            guard applicationCompleted.wait(timeout: .now() + 1.5) == .success else {
+                return Data("{\"ok\":false}".utf8)
             }
             return Data("{\"ok\":true}".utf8)
         }

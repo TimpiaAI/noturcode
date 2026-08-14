@@ -226,16 +226,17 @@ struct NoturcodeBridgeMain {
 
     private static func send(payload data: Data, launchIfNeeded: Bool) throws {
         do {
-            _ = try UnixSocketClient.send(data)
+            try sendAcknowledged(data)
             return
         } catch {
+            if case UnixSocketError.responseTimeout = error { throw error }
             guard launchIfNeeded, let path = findAppPath() else { throw error }
             launchApp(at: path)
             var lastError: Error = error
             for _ in 0..<30 {
                 Thread.sleep(forTimeInterval: 0.05)
                 do {
-                    _ = try UnixSocketClient.send(data)
+                    try sendAcknowledged(data)
                     return
                 } catch {
                     lastError = error
@@ -243,6 +244,19 @@ struct NoturcodeBridgeMain {
             }
             throw lastError
         }
+    }
+
+    private static func sendAcknowledged(_ data: Data) throws {
+        let response = try UnixSocketClient.send(data)
+        guard responseAcknowledgesPersistence(response) else {
+            throw UnixSocketError.responseTimeout
+        }
+    }
+
+    private static func responseAcknowledgesPersistence(_ response: Data) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: response) as? [String: Any],
+              let ok = object["ok"] as? Bool else { return false }
+        return ok
     }
 
     private static func findAppPath() -> String? {
