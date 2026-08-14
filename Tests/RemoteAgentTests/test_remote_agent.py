@@ -172,6 +172,21 @@ class RemoteAgentTests(unittest.TestCase):
         self.assertEqual(response["error"], "invalid code")
         self.assertEqual(app_server.request["type"], "remotePair")
 
+    def test_active_codex_session_ids_extracts_unique_resume_writers(self):
+        process_list = """
+100 node /usr/bin/codex resume 019ff72e-75b9-7700-aa47-f0295f58b30c
+101 /usr/bin/codex resume 019ff72e-75b9-7700-aa47-f0295f58b30c
+102 /usr/bin/codex resume 11111111-2222-3333-4444-555555555555
+103 /usr/bin/codex-code-mode-host
+"""
+        self.assertEqual(
+            self.agent.active_codex_session_ids(process_list),
+            [
+                "019ff72e-75b9-7700-aa47-f0295f58b30c",
+                "11111111-2222-3333-4444-555555555555",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

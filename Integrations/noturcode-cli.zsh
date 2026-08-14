@@ -174,7 +174,7 @@ connect_host() {
   terminal_id=$("$bridge" terminal-id) || return 1
   remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-$$.sock"
   if [[ "$mode" == "resume" ]]; then
-    remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; exec \"\${SHELL:-/bin/sh}\" -lc 'codex resume --all'"
+    remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; \"\$HOME/.local/bin/noturcode-agent\" resume; resume_exit=\$?; if [ \$resume_exit -ne 0 ]; then print '\nNoturcode kept this VPS shell open. Run nc resume again after the active chat closes.' 2>/dev/null || echo '\nNoturcode kept this VPS shell open. Run nc resume again after the active chat closes.'; exec \"\${SHELL:-/bin/sh}\" -l; fi"
   else
     remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; exec \"\${SHELL:-/bin/sh}\" -l"
   fi
@@ -194,9 +194,9 @@ connect_host() {
     -o StreamLocalBindUnlink=yes \
     -R "${remote_socket}:${active_proxy_socket}" \
     "$host" "$remote_command"
-  local status=$?
+  local ssh_exit_code=$?
   stop_proxy
-  return "$status"
+  return "$ssh_exit_code"
 }
 
 resume_codex() {

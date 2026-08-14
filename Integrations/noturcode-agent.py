@@ -8,9 +8,11 @@ import datetime as dt
 import json
 import os
 import pathlib
+import re
 import shutil
 import socket
 import stat
+import subprocess
 import sys
 import uuid
 
@@ -354,6 +356,42 @@ def doctor() -> int:
     return 0 if paired else 1
 
 
+def active_codex_session_ids(process_list: str) -> list[str]:
+    identifiers: list[str] = []
+    for match in re.finditer(r"\bcodex\s+resume\s+([0-9a-fA-F-]{36})\b", process_list):
+        identifier = match.group(1).lower()
+        if identifier not in identifiers:
+            identifiers.append(identifier)
+    return identifiers
+
+
+def resume_codex() -> int:
+    process_scan = subprocess.run(
+        ["pgrep", "-af", "codex"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    active = active_codex_session_ids(process_scan.stdout)
+    if active:
+        print("", file=sys.stderr)
+        print("[!] Codex chats with an active writer:", file=sys.stderr)
+        for identifier in active:
+            print(f"    {identifier}", file=sys.stderr)
+        print("    Close one in its old terminal before you select it here.", file=sys.stderr)
+        print("", file=sys.stderr)
+    try:
+        result = subprocess.call(["codex", "resume", "--all"])
+    except FileNotFoundError:
+        print("Noturcode: Codex is not installed on this VPS.", file=sys.stderr)
+        return 127
+    if result != 0:
+        print("", file=sys.stderr)
+        print("Noturcode: The chat was not resumed.", file=sys.stderr)
+        print("Choose another chat, or close its active writer first.", file=sys.stderr)
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="noturcode-agent")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -363,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     hook_parser.add_argument("--source", required=True, choices=("claude", "codex", "gemini"))
     commands.add_parser("install")
     commands.add_parser("doctor")
+    commands.add_parser("resume")
     proxy_parser = commands.add_parser("proxy")
     proxy_parser.add_argument("--listen", required=True)
     proxy_parser.add_argument("--target", required=True)
@@ -380,6 +419,8 @@ def main() -> int:
         return install_hooks()
     if arguments.command == "doctor":
         return doctor()
+    if arguments.command == "resume":
+        return resume_codex()
     if arguments.command == "proxy":
         return serve_proxy(arguments.listen, arguments.target, arguments.max_connections)
     return 2
