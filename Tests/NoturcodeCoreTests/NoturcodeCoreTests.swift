@@ -502,6 +502,9 @@ final class NoturcodeCoreTests: XCTestCase {
         """))
         XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("Noturcode completion map"))
         XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("ASCII boxes, branches, and arrows"))
+        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("at most 16 lines"))
+        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("changed file or component"))
+        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("exact verification result"))
         XCTAssertFalse(NoturcodeSummaryContract.isCompliant("Done with the animation."))
         XCTAssertTrue(NoturcodeSummaryContract.shouldInject(for: "Fix the animation"))
         XCTAssertFalse(NoturcodeSummaryContract.shouldInject(for: "/compact"))
@@ -1149,25 +1152,42 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
     }
 
-    func testExpandedNotchPreservesCompactHeaderAboveSessionDetails() throws {
+    func testExpandedNotchMorphsContentInsideOnePersistentHeader() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
 
-        XCTAssertTrue(surface.contains("private var persistentDockHeader: some View"))
+        XCTAssertTrue(surface.contains("private var dockHeader: some View"))
+        XCTAssertFalse(surface.contains("private var activeDockHeader: some View"))
+        XCTAssertFalse(surface.contains("private var persistentDockHeader: some View"))
         let stackStart = try XCTUnwrap(surface.range(of: "VStack(spacing: 0)"))
-        let headerDefinition = try XCTUnwrap(surface.range(of: "private var persistentDockHeader"))
+        let headerDefinition = try XCTUnwrap(surface.range(of: "private var dockHeader"))
         let composition = String(surface[stackStart.lowerBound..<headerDefinition.lowerBound])
-        let header = try XCTUnwrap(composition.range(of: "persistentDockHeader"))
-        let details = try XCTUnwrap(composition.range(of: "expandedContent"))
+        let header = try XCTUnwrap(composition.range(of: "dockHeader"))
+        let details = try XCTUnwrap(composition.range(of: "expandedDetails"))
         XCTAssertLessThan(header.lowerBound, details.lowerBound)
-        XCTAssertTrue(composition.contains("if state.isExpanded"))
         XCTAssertTrue(composition.contains(".transition(coordinatedContentTransition)"))
         XCTAssertTrue(surface.contains("+ metrics.dockRailHeight(sessionCount: store.sessions.count)"))
-        XCTAssertFalse(surface.contains("if state.isExpanded {\n                    expandedSurface\n                } else"))
         XCTAssertFalse(surface.contains(".padding(.top, metrics.neckHeight + 9)"))
+
+        let adaptiveStart = try XCTUnwrap(surface.range(of: "private struct AdaptiveDockHeader"))
+        let announcementStart = try XCTUnwrap(surface.range(of: "struct AnnouncementView"))
+        let adaptive = String(surface[adaptiveStart.lowerBound..<announcementStart.lowerBound])
+        XCTAssertTrue(adaptive.contains("NoturcodeBrandMark(size: 19)"))
+        XCTAssertTrue(adaptive.contains("ZStack(alignment: .leading)"))
+        XCTAssertTrue(adaptive.contains("sessionStrip(sessions)"))
+        XCTAssertTrue(adaptive.contains(".opacity(isExpanded ? 0 : 1)"))
+        XCTAssertTrue(adaptive.contains("BillGatesQuoteRotator("))
+        XCTAssertTrue(adaptive.contains(".opacity(isExpanded ? 1 : 0)"))
+        XCTAssertTrue(adaptive.contains("private var compactContentAnimation: Animation?"))
+        XCTAssertTrue(adaptive.contains("private var quoteContentAnimation: Animation?"))
+        XCTAssertTrue(adaptive.contains(".delay(0.06)"))
+        XCTAssertTrue(adaptive.contains(".animation(compactContentAnimation, value: isExpanded)"))
+        XCTAssertTrue(adaptive.contains(".animation(quoteContentAnimation, value: isExpanded)"))
+        XCTAssertFalse(adaptive.contains(".scaleEffect(x:"))
+        XCTAssertFalse(adaptive.contains(".animation(.easeOut(duration: 0.14), value: isExpanded)"))
     }
 
     func testExpandedNotchSessionRowsDoNotRenderToolActivityInspector() throws {
@@ -1183,20 +1203,27 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains("if isHovered || isActivityExpanded"))
     }
 
-    func testExpandedNotchFeaturesMostRelevantChatAboveRemainingSessions() throws {
+    func testExpandedNotchShowsRotatingQuoteAndKeepsEverySessionInList() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
 
-        XCTAssertTrue(surface.contains("private var featuredSession: TrackedSession?"))
-        XCTAssertTrue(surface.contains("first(where: { $0.state == .askingYou })"))
-        XCTAssertTrue(surface.contains("first(where: { $0.state == .working })"))
-        XCTAssertTrue(surface.contains("FeaturedSessionHeader("))
-        XCTAssertTrue(surface.contains("sessions: remainingSessions"))
-        XCTAssertTrue(surface.contains("Text(headerLabel)"))
-        XCTAssertTrue(surface.contains("Text(\"View chat\")"))
+        XCTAssertTrue(surface.contains("private struct BillGatesQuoteRotator"))
+        XCTAssertTrue(surface.contains("BillGatesQuoteRotator("))
+        XCTAssertTrue(surface.contains("sessions: store.sortedSessions"))
+        XCTAssertTrue(surface.contains("The world can get better."))
+        XCTAssertTrue(surface.contains("The acceleration of innovation is just starting."))
+        XCTAssertTrue(surface.contains("Task.sleep(for: .seconds(10))"))
+        XCTAssertTrue(surface.contains("contentTransition(.opacity)"))
+        XCTAssertTrue(surface.contains("accessibilityIdentifier(\"bill-gates-quote\")"))
+        XCTAssertFalse(surface.contains("remainingSessions"))
+        XCTAssertFalse(surface.contains("latestPromptSession"))
+        XCTAssertFalse(surface.contains("headerLabel"))
+        XCTAssertFalse(surface.contains("Text(preview)"))
+        XCTAssertFalse(surface.contains("Text(\"View chat\")"))
+        XCTAssertFalse(surface.contains("activeSubagents"))
         XCTAssertFalse(surface.contains("session.currentActivity"))
     }
 
@@ -1248,7 +1275,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(coordinator.contains("max(340"))
     }
 
-    func testDoneSummaryGetsTwoLinesAndResponseScopedHoverPopover() throws {
+    func testDoneSummaryPopoverShowsOnlyAgentWrittenStatus() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1257,9 +1284,11 @@ final class NoturcodeCoreTests: XCTestCase {
         let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
         XCTAssertTrue(sessions.contains("lineLimit(2, reservesSpace: true)"))
-        XCTAssertTrue(sessions.contains("activity.startedAt >= session.lastPromptAt"))
         XCTAssertTrue(sessions.contains(".popover(isPresented: $isPresented, arrowEdge: .trailing)"))
         XCTAssertTrue(sessions.contains("accessibilityIdentifier(\"done-summary-popover-"))
+        XCTAssertFalse(sessions.contains("private var responseActivities"))
+        XCTAssertFalse(sessions.contains("done-summary-steps-"))
+        XCTAssertFalse(sessions.contains("Steps in this response"))
         XCTAssertTrue(sessions.contains("guard session.state.showsCompletionSummary else { return nil }"))
         XCTAssertTrue(sessions.contains("if session.state == .working"))
         XCTAssertTrue(sessions.contains("return \"Working on the current prompt\""))

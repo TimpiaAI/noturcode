@@ -41,20 +41,6 @@ struct NotchSurfaceView: View {
         )
     }
 
-    private var featuredSession: TrackedSession? {
-        let sessions = store.sortedSessions
-        return sessions.first(where: { $0.state == .askingYou })
-            ?? sessions.first(where: { $0.state == .working })
-            ?? sessions.first(where: { $0.state == .failed })
-            ?? sessions.first(where: { model.completionReads.isUnread($0) })
-            ?? sessions.first
-    }
-
-    private var remainingSessions: [TrackedSession] {
-        guard let featuredSession else { return store.sortedSessions }
-        return store.sortedSessions.filter { $0.id != featuredSession.id }
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             if !store.sessions.isEmpty {
@@ -69,9 +55,9 @@ struct NotchSurfaceView: View {
                     )
 
                 VStack(spacing: 0) {
-                    persistentDockHeader
+                    dockHeader
                     if state.isExpanded {
-                        expandedContent
+                        expandedDetails
                             .transition(coordinatedContentTransition)
                     }
                 }
@@ -95,9 +81,10 @@ struct NotchSurfaceView: View {
         )
     }
 
-    private var persistentDockHeader: some View {
-        RestIndicatorView(
+    private var dockHeader: some View {
+        AdaptiveDockHeader(
             sessions: store.sortedSessions,
+            isExpanded: state.isExpanded,
             metrics: metrics,
             completionReads: model.completionReads,
             onShowAll: { state.expand() }
@@ -109,22 +96,13 @@ struct NotchSurfaceView: View {
         )
     }
 
-    private var expandedContent: some View {
-        VStack(spacing: 0) {
-            if let featuredSession {
-                FeaturedSessionHeader(
-                    session: featuredSession,
-                    completionIsUnread: model.completionReads.isUnread(featuredSession),
-                    onOpen: { model.showTerminalWindow(for: featuredSession) }
-                )
-            }
-            ExpandedSessionList(
-                sessions: remainingSessions,
-                staleMessage: store.lastStaleTargetMessage,
-                model: model,
-                state: state
-            )
-        }
+    private var expandedDetails: some View {
+        ExpandedSessionList(
+            sessions: store.sortedSessions,
+            staleMessage: store.lastStaleTargetMessage,
+            model: model,
+            state: state
+        )
         .padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -166,94 +144,40 @@ struct NotchSurfaceView: View {
     }
 }
 
-private struct FeaturedSessionHeader: View {
-    let session: TrackedSession
-    let completionIsUnread: Bool
-    let onOpen: () -> Void
+private struct BillGatesQuoteRotator: View {
+    private static let quotes = [
+        "I have always been an optimist.",
+        "The key will be, as always, innovation.",
+        "The world can get better.",
+        "The acceleration of innovation is just starting.",
+        "The risks are real, but I am optimistic that they can be managed.",
+        "We’ve done it before.",
+        "We cannot merely hope for the best.",
+        "We need to design for it, together."
+    ]
 
-    private var headerLabel: String {
-        switch session.state {
-        case .askingYou: "Needs you"
-        case .working: "Active chat"
-        case .failed: "Failed chat"
-        case .done: completionIsUnread ? "New completion" : "Latest chat"
-        case .idle: "Latest chat"
-        }
-    }
-
-    private var preview: String {
-        if session.state == .working {
-            let count = session.activeSubagents.count
-            return count > 0 ? "\(count) active agent\(count == 1 ? "" : "s")" : "Working on the current prompt"
-        }
-        return session.lastAgentMessage?
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first(where: { !$0.isEmpty })
-            ?? session.state.displayName
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var quoteIndex = 0
 
     var body: some View {
-        HStack(spacing: 10) {
-            SessionMarble(
-                session: session,
-                size: 22,
-                animate: session.state == .working || session.state == .askingYou,
-                completionIsUnread: completionIsUnread
-            )
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 5) {
-                    Text(headerLabel)
-                        .font(.system(size: 8.5, weight: .bold))
-                        .textCase(.uppercase)
-                        .tracking(0.7)
-                        .foregroundStyle(.white.opacity(0.42))
-                    ProviderMark(source: session.key.source, size: 11)
-                    Text(session.name)
-                        .font(.system(size: 12.5, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.94))
-                        .lineLimit(1)
+        Text("“\(Self.quotes[quoteIndex])” — Bill Gates")
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(.white.opacity(0.78))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .contentTransition(.opacity)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: quoteIndex)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("bill-gates-quote")
+            .task {
+                quoteIndex = Int.random(in: Self.quotes.indices)
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(10))
+                    guard !Task.isCancelled else { break }
+                    let step = Int.random(in: 1..<Self.quotes.count)
+                    quoteIndex = (quoteIndex + step) % Self.quotes.count
                 }
-                Text(preview)
-                    .font(.system(size: 10.5, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 5) {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text("\(session.state.displayName) · \(DurationFormatting.relative(from: session.stateChangedAt, to: context.date))")
-                        .font(.system(size: 9, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.white.opacity(0.50))
-                        .lineLimit(1)
-                }
-                Button(action: onOpen) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "bubble.left.and.bubble.right")
-                        Text("View chat")
-                    }
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(.white.opacity(0.07), in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("featured-chat-\(session.id)")
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 66)
-        .background(.white.opacity(0.022))
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(.white.opacity(0.075))
-                .frame(height: 0.5)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(headerLabel), \(session.name), \(session.state.displayName)")
     }
 }
 
@@ -317,11 +241,13 @@ struct NotchSilhouette: Shape {
     }
 }
 
-private struct RestIndicatorView: View {
+private struct AdaptiveDockHeader: View {
     let sessions: [TrackedSession]
+    let isExpanded: Bool
     let metrics: NotchMetrics
     @ObservedObject var completionReads: CompletionReadStore
     let onShowAll: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var animatedSessionID: String? {
         sessions.first(where: { $0.state.needsAttention })?.id ?? sessions.first?.id
@@ -341,20 +267,49 @@ private struct RestIndicatorView: View {
         sessions.map(\.name).joined(separator: ", ")
     }
 
+    // Keep the shell mounted. Swap only its content in two stages.
+    // See docs/NOTCH-MOTION.md.
+    private var compactContentAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return isExpanded
+            ? .easeOut(duration: 0.06)
+            : .easeOut(duration: 0.10).delay(0.06)
+    }
+
+    private var quoteContentAnimation: Animation? {
+        guard !reduceMotion else { return nil }
+        return isExpanded
+            ? .easeOut(duration: 0.10).delay(0.06)
+            : .easeOut(duration: 0.06)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             NoturcodeBrandMark(size: 19)
             Rectangle()
                 .fill(.white.opacity(0.12))
                 .frame(width: 1, height: 20)
-            sessionStrip(sessions)
+            ZStack(alignment: .leading) {
+                sessionStrip(sessions)
+                    .opacity(isExpanded ? 0 : 1)
+                    .animation(compactContentAnimation, value: isExpanded)
+                    .allowsHitTesting(!isExpanded)
+                    .accessibilityHidden(isExpanded)
+
+                BillGatesQuoteRotator()
+                    .opacity(isExpanded ? 1 : 0)
+                    .animation(quoteContentAnimation, value: isExpanded)
+                    .allowsHitTesting(isExpanded)
+                    .accessibilityHidden(!isExpanded)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 14)
         .frame(height: metrics.dockRailHeight(sessionCount: sessions.count))
         .padding(.top, metrics.dockContentTopInset)
         .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
+        .accessibilityLabel(isExpanded ? "Noturcode quote" : "Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
     }
 

@@ -244,9 +244,9 @@ final class NoturcodeUITests: XCTestCase {
         app.launch()
 
         let sessionRow = app.descendants(matching: .any)["session-row-claude:ui-spotlight"].firstMatch
-        let featuredChat = app.descendants(matching: .any)["featured-chat-claude:ui-spotlight"].firstMatch
-        XCTAssertTrue(featuredChat.waitForExistence(timeout: 3))
-        XCTAssertFalse(sessionRow.exists, "The featured chat should not be duplicated in the remaining list")
+        let quote = app.descendants(matching: .any)["bill-gates-quote"].firstMatch
+        XCTAssertTrue(quote.waitForExistence(timeout: 3))
+        XCTAssertTrue(sessionRow.waitForExistence(timeout: 3), "The full session list must remain below the quote")
         XCTAssertFalse(app.descendants(matching: .any)["activity-expand-claude:ui-spotlight"].firstMatch.exists)
         XCTAssertFalse(app.descendants(matching: .any)["activity-scroll-claude:ui-spotlight"].firstMatch.exists)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label == 'done'")).firstMatch.exists)
@@ -397,7 +397,7 @@ final class NoturcodeUITests: XCTestCase {
     }
 
     @MainActor
-    func testDoneSummaryHoverShowsResponseScopedSteps() throws {
+    func testDoneSummaryHoverShowsOnlyAgentWrittenStatus() throws {
         let stateURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-ui-done-summary-\(ProcessInfo.processInfo.processIdentifier).json")
         let fixture = """
@@ -429,15 +429,13 @@ final class NoturcodeUITests: XCTestCase {
 
         let done = app.descendants(matching: .any)["done-summary-codex:done-hover"].firstMatch
         XCTAssertTrue(done.waitForExistence(timeout: 3))
-        done.hover()
+        done.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).hover()
         let popover = app.descendants(matching: .any)["done-summary-popover-codex:done-hover"].firstMatch
         XCTAssertTrue(popover.waitForExistence(timeout: 2))
         XCTAssertTrue(app.descendants(matching: .any)["done-summary-ascii-map-codex:done-hover"].firstMatch.exists)
-        let steps = app.descendants(matching: .any)["done-summary-steps-codex:done-hover"].firstMatch
-        XCTAssertTrue(steps.waitForExistence(timeout: 1))
-        let responseSteps = steps.label
-        XCTAssertTrue(responseSteps.contains("Verify summary popover"), "response steps: \(responseSteps)")
-        XCTAssertFalse(responseSteps.contains("Old response"))
+        XCTAssertFalse(app.descendants(matching: .any)["done-summary-steps-codex:done-hover"].firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["Verify summary popover"].exists)
+        XCTAssertFalse(app.staticTexts["Old response"].exists)
     }
 
     @MainActor

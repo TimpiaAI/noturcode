@@ -4,7 +4,9 @@ public enum NoturcodeSummaryContract {
     public static let instruction = """
     Before the final summary, add a compact diagram introduced by the exact line `Noturcode completion map`, followed by a fenced `text` block.
     The diagram must use ASCII boxes, branches, and arrows to show the real flow from request through changed components to verification.
-    Keep it concrete, readable, and at most 10 lines. Use ASCII characters only, such as + - | > < / \\; do not use Mermaid or Unicode box drawing.
+    Make the diagram detailed enough to replace a tool log. Use 8 to 16 lines when the work has multiple parts.
+    For each useful branch, name the changed file or component, the concrete change, and the exact verification result.
+    Keep it concrete, readable, and at most 16 lines. Use ASCII characters only, such as + - | > < / \\; do not use Mermaid or Unicode box drawing.
     Then end the final response with exactly these three lines:
     Noturcode summary
     Done: [x] <completed work> -> [x] <verification>

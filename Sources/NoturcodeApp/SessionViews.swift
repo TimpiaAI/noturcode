@@ -391,12 +391,6 @@ private struct DoneSummaryPreview: View {
         return min(screenLimit, max(322, contentWidth))
     }
 
-    private var responseActivities: [ActivitySnapshot] {
-        session.toolActivities
-            .filter { activity in activity.startedAt >= session.lastPromptAt }
-            .suffix(8)
-    }
-
     var body: some View {
         Text(done)
             .foregroundStyle(.white.opacity(0.82))
@@ -455,31 +449,6 @@ private struct DoneSummaryPreview: View {
                 .accessibilityIdentifier("done-summary-ascii-map-\(session.id)")
             }
 
-            if !responseActivities.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(responseActivities.enumerated()), id: \.element.id) { index, activity in
-                        HStack(alignment: .top, spacing: 9) {
-                            VStack(spacing: 2) {
-                                Circle()
-                                    .fill(activity.finishedAt == nil ? .cyan.opacity(0.72) : .white.opacity(0.30))
-                                    .frame(width: 6, height: 6)
-                                if index < responseActivities.count - 1 {
-                                    Rectangle()
-                                        .fill(.white.opacity(0.09))
-                                        .frame(width: 1, height: 18)
-                                }
-                            }
-                            Text(activity.label)
-                                .font(.system(size: 10.5, weight: .regular))
-                                .foregroundStyle(.white.opacity(0.62))
-                                .lineLimit(2)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                }
-                .accessibilityLabel("Steps in this response")
-            }
-
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("NEEDS YOU")
                     .font(.system(size: 8.5, weight: .bold))
@@ -491,11 +460,6 @@ private struct DoneSummaryPreview: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Color.clear
-                .frame(width: 1, height: 1)
-                .accessibilityElement()
-                .accessibilityLabel("Response steps: \(responseActivities.map(\.label).joined(separator: ", "))")
-                .accessibilityIdentifier("done-summary-steps-\(session.id)")
         }
         .padding(14)
         .frame(width: completionMapWidth, alignment: .leading)
