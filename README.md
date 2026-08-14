@@ -42,19 +42,23 @@ Noturcode is an open-source Vibe Island alternative, but it is deliberately not 
 
 The table is intentionally capability-by-capability. “Detected” does not mean every feature is implemented.
 
-| Harness | Status hooks | Local transcript | Tool batches | Subagent threads | Send to same pane | Token totals |
-| --- | :---: | :---: | :---: | :---: | :---: | :---: |
-| Claude Code | Yes | Yes | Yes | Yes | Yes | Yes |
-| OpenAI Codex CLI | Yes | Yes | Yes | Limited by Codex events | Yes | Yes |
-| Gemini CLI | Experimental | No | Status only | No | iTerm2 pane only | No |
-| OpenCode | Experimental | No | Status only | No | iTerm2 pane only | No |
-| Grok / generic harness | Bridge event model only | No | No | No | No | No |
+| Harness | Status | Conversation and tools | Prompt control | Main limits |
+| --- | :---: | --- | --- | --- |
+| Claude Code | Verified hooks | Local JSONL, tools, tokens, subagents | Exact iTerm pane | No native session creation |
+| OpenAI Codex CLI | Verified hooks; native app-server is experimental | Local JSONL and native stream | Exact iTerm pane or native thread | Native tokens and full subagent threads are missing |
+| Gemini CLI | Experimental hooks and ACP | Current native ACP conversation and tools | Native ACP session | Existing CLI attach, images, tokens, and subagents are missing |
+| OpenCode | Experimental plugin and HTTP/SSE | Native messages/tools plus local SQLite reads | Native local server | Requires an explicit running local server; images and tokens are missing |
+| Grok | Experimental ACP only | Current native ACP conversation and tools | Native ACP session | No hooks, discovery, existing-session attach, images, tokens, or subagents |
 
 | Host | Exact pane return | Prompt delivery | Notes |
 | --- | :---: | :---: | --- |
 | iTerm2 | Yes | Yes | Uses iTerm2's public AppleScript session API. |
-| Terminal, Ghostty, Warp, WezTerm, kitty | Not yet | Not yet | Detected for the setup report; exact navigation is not claimed. |
-| tmux / SSH | Roadmap | Roadmap | Remote identity and forwarding need end-to-end verification before support is advertised. |
+| Terminal.app | Partial, unverified | Partial, unverified | Matches a captured TTY. No live success test is published. |
+| Ghostty | Partial, unverified | Partial, unverified | Matches TTY or PID. No live success test is published. |
+| WezTerm / kitty | Partial, unverified | Partial, unverified | Uses native pane/window IDs and local CLIs. |
+| Warp | App activation only | No | Exact pane selection is not implemented. |
+| tmux / Zellij | Partial, local only | Partial, local only | Uses captured local socket/session and pane IDs. |
+| SSH | No | No | Metadata is captured. Remote transport and forwarding are not implemented. |
 
 ## Install from source
 

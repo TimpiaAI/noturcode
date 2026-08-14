@@ -350,7 +350,28 @@ actor NativeSessionCoordinator {
     }
 
     func compact(_ session: TrackedSession) async -> ITermPromptResult {
-        await send("/compact", imagePaths: [], to: session)
+        if session.nativeSession?.transport == .codexAppServer {
+            do {
+                let client = try await ensureCodexClient(for: session)
+                await eventSink(BridgeEvent(
+                    kind: .activityStarted,
+                    source: session.key.source,
+                    sessionID: session.key.sessionID,
+                    activity: "compacting"
+                ))
+                try await client.compactThread(threadID: session.key.sessionID)
+                return .sent
+            } catch {
+                await eventSink(BridgeEvent(
+                    kind: .failed,
+                    source: session.key.source,
+                    sessionID: session.key.sessionID,
+                    error: error.localizedDescription
+                ))
+                return .failed(error.localizedDescription)
+            }
+        }
+        return await send("/compact", imagePaths: [], to: session)
     }
 
     func stop(session: TrackedSession) async {
@@ -844,6 +865,13 @@ actor NativeSessionCoordinator {
                 transcriptPath: writer.fileURL.path
             ))
 
+        case let .threadCompacted(threadID, _):
+            await eventSink(bridgeEvent(
+                .activityFinished,
+                threadID: threadID,
+                activity: "compacting"
+            ))
+
         case let .failed(threadID, message):
             guard let threadID else { return }
             await eventSink(bridgeEvent(.failed, threadID: threadID, error: message))
@@ -930,8 +958,28 @@ actor NativeSessionCoordinator {
             title: approvalLabel(method),
             detail: detail.isEmpty ? nil : detail,
             kind: .codexDecision,
-            options: decisionOptions
+            options: codexDecisionOptions(params)
         )
+    }
+
+    private static func codexDecisionOptions(_ params: JSONValue) -> [ApprovalOption] {
+        guard let offered = CodexAppServerEventMapper.availableDecisionIDs(in: params) else {
+            return decisionOptions
+        }
+        return offered.compactMap { id in
+            switch id {
+            case "accept":
+                ApprovalOption(id: id, label: "Allow once", isDestructive: false)
+            case "acceptForSession":
+                ApprovalOption(id: id, label: "Allow this session", isDestructive: false)
+            case "decline":
+                ApprovalOption(id: id, label: "Reject", isDestructive: true)
+            case "cancel":
+                ApprovalOption(id: id, label: "Reject and stop", isDestructive: true)
+            default:
+                nil
+            }
+        }
     }
 
     private static let decisionOptions = [

@@ -37,6 +37,48 @@ private final class MouseLocationCoalescer: @unchecked Sendable {
     }
 }
 
+@MainActor
+private final class NotchSurfaceCursorCoordinator {
+    static let shared = NotchSurfaceCursorCoordinator()
+
+    private var activePanelIDs: Set<UUID> = []
+    private var previousCursor: NSCursor?
+    private var restoreTask: Task<Void, Never>?
+
+    func setActive(_ active: Bool, panelID: UUID) {
+        restoreTask?.cancel()
+        restoreTask = nil
+
+        if active {
+            let wasEmpty = activePanelIDs.isEmpty
+            activePanelIDs.insert(panelID)
+            if wasEmpty {
+                previousCursor = NSCursor.currentSystem
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.activePanelIDs.isEmpty else { return }
+                NSCursor.pointingHand.set()
+            }
+            return
+        }
+
+        activePanelIDs.remove(panelID)
+        guard activePanelIDs.isEmpty else { return }
+        restoreTask = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, self.activePanelIDs.isEmpty else { return }
+            let previous = self.previousCursor
+            self.previousCursor = nil
+            self.restoreTask = nil
+            let visible = NSCursor.currentSystem?.image.tiffRepresentation
+            let hand = NSCursor.pointingHand.image.tiffRepresentation
+            if visible == hand {
+                previous?.set()
+            }
+        }
+    }
+}
+
 struct NotchMetrics: Equatable, Sendable {
     let displayID: UInt32
     let screenFrame: CGRect
@@ -46,7 +88,9 @@ struct NotchMetrics: Equatable, Sendable {
     let neckWidth: CGFloat
     let neckHeight: CGFloat
 
-    var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }
+    // The panel frame already starts at screen.maxY. A second visual inset
+    // creates a gap and also moves the hit region away from the visible dock.
+    var surfaceTopInset: CGFloat { 0 }
     var minimumDockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }
     var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }
     var dockContentTopInset: CGFloat { hasHardwareNotch ? neckHeight + notchShoulderClearance : 0 }
@@ -355,7 +399,6 @@ final class NotchPresentationState: ObservableObject {
     private let isUITestForcedExpanded: Bool
     private var dwellTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
-    private var hoverIntentTask: Task<Void, Never>?
     private var hoverClearTask: Task<Void, Never>?
 
     init() {
@@ -403,25 +446,12 @@ final class NotchPresentationState: ObservableObject {
     }
 
     func setHoveredSession(_ id: String?) {
-        hoverIntentTask?.cancel()
-        hoverIntentTask = nil
         hoverClearTask?.cancel()
         hoverClearTask = nil
         if let id {
-            if isUITestSpotlight || hoveredSessionID == nil {
-                hoveredSessionID = id
-                return
-            }
-            guard hoveredSessionID != id else { return }
-            hoverIntentTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .milliseconds(90))
-                } catch {
-                    return
-                }
-                self?.hoveredSessionID = id
-                self?.hoverIntentTask = nil
-            }
+            // Row feedback must follow the pointer on the same frame. The old
+            // 90 ms intent timer made the gray selection lag behind the mouse.
+            hoveredSessionID = id
             return
         }
         hoverClearTask = Task { [weak self] in
@@ -491,8 +521,9 @@ final class NotchPresentationState: ObservableObject {
 
 @MainActor
 final class NotchPanelController {
+    private let cursorPanelID = UUID()
     private let panel: NotchPanel
-    private let hostingView: NSHostingView<NotchSurfaceView>
+    private let hostingView: NotchHostingView
     private let state: NotchPresentationState
     private let model: AppModel
     private var metrics: NotchMetrics
@@ -508,7 +539,7 @@ final class NotchPanelController {
             defer: false,
             screen: screen
         )
-        hostingView = NSHostingView(rootView: NotchSurfaceView(model: model, state: state, metrics: metrics))
+        hostingView = NotchHostingView(rootView: NotchSurfaceView(model: model, state: state, metrics: metrics))
 
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -519,11 +550,17 @@ final class NotchPanelController {
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.allowsToolTipsWhenApplicationIsInactive = true
         panel.isMovable = false
+        panel.acceptsMouseMovedEvents = true
         panel.ignoresMouseEvents = !state.isUITestSpotlight
         panel.contentView = hostingView
         update(screen: screen, metrics: metrics)
         panel.orderFrontRegardless()
+        panel.enableCursorRects()
+        panel.resetCursorRects()
     }
 
     func update(screen: NSScreen, metrics: NotchMetrics) {
@@ -534,6 +571,7 @@ final class NotchPanelController {
         )
         panel.setFrame(CGRect(origin: origin, size: CGSize(width: metrics.envelopeWidth, height: metrics.envelopeHeight)), display: true)
         hostingView.rootView = NotchSurfaceView(model: model, state: state, metrics: metrics)
+        panel.resetCursorRects()
     }
 
     func refresh() {
@@ -572,10 +610,20 @@ final class NotchPanelController {
         let ignoresMouseEvents = state.isUITestSpotlight ? false : !inside
         let interactionChanged = panel.ignoresMouseEvents != ignoresMouseEvents
         panel.ignoresMouseEvents = ignoresMouseEvents
-        if interactionChanged, !ignoresMouseEvents, let contentView = panel.contentView {
-            panel.invalidateCursorRects(for: contentView)
+        if interactionChanged, !ignoresMouseEvents {
+            // The panel is non-activating and never becomes key. Invalidation
+            // can wait for a key transition that never occurs, so rebuild now.
+            panel.enableCursorRects()
+            panel.resetCursorRects()
         }
+        // AppKit can replace a cursor set while the panel still ignores mouse
+        // events. Make the panel interactive and rebuild its rects first.
+        updateSurfaceCursor(inside: inside)
         state.pointerMoved(inside: inside)
+    }
+
+    private func updateSurfaceCursor(inside: Bool) {
+        NotchSurfaceCursorCoordinator.shared.setActive(inside, panelID: cursorPanelID)
     }
 
     func dismiss() {
@@ -583,6 +631,7 @@ final class NotchPanelController {
     }
 
     func close() {
+        updateSurfaceCursor(inside: false)
         panel.orderOut(nil)
         panel.close()
     }
@@ -622,4 +671,19 @@ private final class AnnouncementHostingView: NSHostingView<AnyView> {
 final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    // This panel must occupy the menu-bar/notch area. AppKit otherwise clamps
+    // a borderless window below the menu bar after launch or display changes.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect {
+        return frameRect
+    }
+}
+
+final class NotchHostingView: NSHostingView<NotchSurfaceView> {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        let clickableBounds = bounds.intersection(visibleRect)
+        guard !clickableBounds.isEmpty else { return }
+        addCursorRect(clickableBounds, cursor: .pointingHand)
+    }
 }

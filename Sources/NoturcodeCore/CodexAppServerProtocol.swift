@@ -12,11 +12,17 @@ public enum CodexAppServerEvent: Equatable, Sendable {
         completed: Bool
     )
     case askingYou(threadID: String?, requestID: JSONValue?, method: String, params: JSONValue)
+    case threadCompacted(threadID: String, turnID: String)
     case turnCompleted(threadID: String, turnID: String, finalMessage: String?)
     case failed(threadID: String?, message: String)
 }
 
 public enum CodexAppServerEventMapper {
+    public static func availableDecisionIDs(in params: JSONValue) -> [String]? {
+        guard case let .array(values) = params["availableDecisions"] else { return nil }
+        return values.compactMap(\.stringValue)
+    }
+
     public static func map(_ message: LineJSONRPCMessage) -> CodexAppServerEvent? {
         guard let method = message.method else { return nil }
         let params = message.params ?? .object([:])
@@ -68,6 +74,10 @@ public enum CodexAppServerEventMapper {
                 turnID: turnID,
                 finalMessage: params.firstString(at: [["turn", "lastAgentMessage"], ["lastAgentMessage"]])
             )
+        case "thread/compacted":
+            guard let threadID,
+                  let turnID = params.firstString(for: ["turnId"]) else { return nil }
+            return .threadCompacted(threadID: threadID, turnID: turnID)
         case "error":
             return .failed(
                 threadID: threadID,
@@ -158,6 +168,13 @@ public actor CodexAppServerClient {
                 "threadId": .string(threadID),
                 "input": .array(input)
             ])
+        )
+    }
+
+    public func compactThread(threadID: String) async throws {
+        _ = try await transport.request(
+            method: "thread/compact/start",
+            params: .object(["threadId": .string(threadID)])
         )
     }
 

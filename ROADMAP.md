@@ -16,9 +16,11 @@ Noturcode publishes capabilities only after an end-to-end test proves them.
 - signed and notarized releases with reproducible checksums
 - integration Doctor with preview, repair, restore, and ownership manifest
 - reliable tmux and SSH session identity/forwarding
-- exact navigation adapters for Terminal, Ghostty, Warp, WezTerm, and kitty
+- executable-fixture and live verification for Terminal, Ghostty, WezTerm, kitty, tmux, and Zellij adapters
+- exact Warp pane navigation and prompt delivery
+- real remote SSH transport and forwarding
 - Codex subagent/team parity as upstream events become available
-- Gemini and OpenCode transcript adapters
+- existing-session attach, images, tokens, and subagent parity for Gemini, Grok, and OpenCode
 - performance budgets for animation, transcript polling, and multiple displays
 
 ## Explicitly not promised yet

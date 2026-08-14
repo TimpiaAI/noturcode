@@ -169,8 +169,9 @@ final class IntegrationBootstrapper {
             ("kitty", "kitty", "/Applications/kitty.app")
         ]
         result += terminals.map { id, name, path in
-            LocalIntegration(id: id, name: name, kind: .terminal,
-                             detected: fileManager.fileExists(atPath: path), configured: true)
+            let detected = fileManager.fileExists(atPath: path)
+            return LocalIntegration(id: id, name: name, kind: .terminal,
+                                    detected: detected, configured: detected && id == "iterm")
         }
         return result
     }

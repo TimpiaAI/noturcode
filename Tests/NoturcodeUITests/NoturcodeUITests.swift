@@ -3,6 +3,47 @@ import XCTest
 
 @MainActor
 final class NoturcodeUITests: XCTestCase {
+    func testClickableControlShowsPointingHandCursor() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-ui-cursor-\(ProcessInfo.processInfo.processIdentifier).json")
+        let fixture = """
+        [{
+          "key":{"source":"claude","sessionID":"ui-cursor"},
+          "name":"cursor-demo",
+          "terminal":{"sessionID":"w0t1p2:UI-CURSOR"},
+          "sourceProcessID":null,
+          "cwd":"/tmp/noturcode-cursor",
+          "state":"working",
+          "connectedAt":"2026-08-14T18:00:00Z",
+          "lastPromptAt":"2026-08-14T18:00:00Z",
+          "stateChangedAt":"2026-08-14T18:00:00Z",
+          "lastAgentMessage":"Working",
+          "tokens":0,
+          "currentActivity":"Working",
+          "activityStartedAt":"2026-08-14T18:00:00Z",
+          "recentActivities":[],
+          "subagents":[],
+          "staleTargetMessage":null
+        }]
+        """
+        try Data(fixture.utf8).write(to: stateURL, options: .atomic)
+        addTeardownBlock { try? FileManager.default.removeItem(at: stateURL) }
+
+        let app = XCUIApplication()
+        app.launchEnvironment["NOTURCODE_SOCKET_PATH"] = "/tmp/noturcode-ui-cursor-\(ProcessInfo.processInfo.processIdentifier).sock"
+        app.launchEnvironment["NOTURCODE_STATE_PATH"] = stateURL.path
+        app.launchArguments = ["--background", "--ui-test-expanded", "--ui-test-hover-first"]
+        app.launch()
+
+        let button = app.descendants(matching: .any)["view-terminal-claude:ui-cursor"].firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 3))
+        button.hover()
+        XCTAssertEqual(
+            NSCursor.currentSystem?.image.tiffRepresentation,
+            NSCursor.pointingHand.image.tiffRepresentation
+        )
+    }
+
     @MainActor
     func testDesktopConversationFirstWorkspace() throws {
         let stateURL = FileManager.default.temporaryDirectory
@@ -259,6 +300,9 @@ final class NoturcodeUITests: XCTestCase {
 
         let viewTerminal = app.descendants(matching: .any)["view-terminal-claude:ui-spotlight"].firstMatch
         XCTAssertTrue(viewTerminal.waitForExistence(timeout: 2))
+        viewTerminal.hover()
+        let visibleCursor = NSCursor.currentSystem
+        XCTAssertEqual(visibleCursor?.image.tiffRepresentation, NSCursor.pointingHand.image.tiffRepresentation)
         viewTerminal.click()
         let terminalCard = app.descendants(matching: .any)["terminal-window-content"].firstMatch
         XCTAssertTrue(terminalCard.waitForExistence(timeout: 3))

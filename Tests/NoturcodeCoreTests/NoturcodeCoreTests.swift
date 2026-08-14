@@ -1565,19 +1565,25 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(cursor.contains("NSViewRepresentable"))
         XCTAssertTrue(cursor.contains("override func resetCursorRects()"))
-        XCTAssertTrue(cursor.contains("addCursorRect(bounds, cursor: .pointingHand)"))
-        XCTAssertTrue(cursor.contains("window?.invalidateCursorRects(for: self)"))
+        XCTAssertTrue(cursor.contains("addCursorRect(clippedBounds, cursor: .pointingHand)"))
         XCTAssertTrue(cursor.contains("override func hitTest"))
         XCTAssertTrue(cursor.contains("return nil"))
         XCTAssertTrue(cursor.contains("NSTrackingArea"))
-        XCTAssertTrue(cursor.contains(".cursorUpdate"))
-        XCTAssertTrue(cursor.contains("override func cursorUpdate"))
+        XCTAssertTrue(cursor.contains(".mouseMoved"))
+        XCTAssertTrue(cursor.contains("override func mouseMoved"))
+        XCTAssertTrue(cursor.contains("NSCursor.pointingHand.push()"))
+        XCTAssertTrue(cursor.contains("NSCursor.pop()"))
+        XCTAssertTrue(cursor.contains("window.enableCursorRects()"))
+        XCTAssertTrue(cursor.contains("window.resetCursorRects()"))
+        XCTAssertFalse(cursor.contains("window?.invalidateCursorRects(for: self)"))
+        XCTAssertFalse(cursor.contains("NSCursor.arrow.set()"))
+        XCTAssertFalse(cursor.contains(".activeAlways, .inVisibleRect, .mouseEnteredAndExited, .cursorUpdate"))
         XCTAssertTrue(cursor.contains("NSEvent.addLocalMonitorForEvents"))
         XCTAssertTrue(cursor.contains("DispatchQueue.main.async"))
         XCTAssertTrue(cursor.contains("applyCursor"))
         XCTAssertTrue(cursor.contains(".onContinuousHover"))
-        XCTAssertFalse(cursor.contains("NSCursor.pointingHand.push()"))
-        XCTAssertFalse(cursor.contains("NSCursor.pop()"))
+        XCTAssertTrue(cursor.contains("NSCursor.pointingHand.push()"))
+        XCTAssertTrue(cursor.contains("NSCursor.pop()"))
     }
 
     func testNotchRebuildsCursorRectsWhenItBecomesInteractive() throws {
@@ -1591,7 +1597,86 @@ final class NoturcodeCoreTests: XCTestCase {
         let pointer = String(source[pointerStart.lowerBound..<dismissStart.lowerBound])
 
         XCTAssertTrue(pointer.contains("ignoresMouseEvents"))
-        XCTAssertTrue(pointer.contains("invalidateCursorRects"))
+        XCTAssertTrue(pointer.contains("panel.enableCursorRects()"))
+        XCTAssertTrue(pointer.contains("panel.resetCursorRects()"))
+        XCTAssertFalse(pointer.contains("invalidateCursorRects"))
+
+        let interaction = try XCTUnwrap(pointer.range(of: "panel.ignoresMouseEvents = ignoresMouseEvents"))
+        let cursor = try XCTUnwrap(pointer.range(of: "updateSurfaceCursor(inside: inside)"))
+        XCTAssertLessThan(interaction.lowerBound, cursor.lowerBound)
+    }
+
+    func testCompactSurfaceStartsAtTheScreenTop() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+
+        XCTAssertTrue(source.contains("var surfaceTopInset: CGFloat { 0 }"))
+        XCTAssertFalse(source.contains("var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }"))
+    }
+
+    func testNotchPanelAcceptsMouseMovedEventsForClickableCursorRegions() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let controllerStart = try XCTUnwrap(source.range(of: "final class NotchPanelController"))
+        let announcementStart = try XCTUnwrap(source.range(of: "private final class AnnouncementHostingView"))
+        let controller = String(source[controllerStart.lowerBound..<announcementStart.lowerBound])
+
+        XCTAssertTrue(controller.contains("panel.acceptsMouseMovedEvents = true"))
+        XCTAssertTrue(controller.contains("panel.isFloatingPanel = true"))
+        XCTAssertTrue(controller.contains("panel.becomesKeyOnlyIfNeeded = true"))
+        XCTAssertTrue(controller.contains("panel.allowsToolTipsWhenApplicationIsInactive = true"))
+        XCTAssertTrue(source.contains("final class NotchHostingView: NSHostingView<NotchSurfaceView>"))
+        XCTAssertTrue(source.contains("addCursorRect(clickableBounds, cursor: .pointingHand)"))
+        XCTAssertTrue(controller.contains("panel.enableCursorRects()"))
+        XCTAssertTrue(controller.contains("panel.resetCursorRects()"))
+        XCTAssertTrue(controller.contains("func updateSurfaceCursor(inside: Bool)"))
+        XCTAssertTrue(source.contains("private final class NotchSurfaceCursorCoordinator"))
+        XCTAssertTrue(source.contains("private var activePanelIDs: Set<UUID> = []"))
+        XCTAssertTrue(source.contains("restoreTask?.cancel()"))
+        XCTAssertTrue(controller.contains("NotchSurfaceCursorCoordinator.shared.setActive(inside, panelID: cursorPanelID)"))
+        XCTAssertFalse(controller.contains("cursorBeforeSurface"))
+        XCTAssertFalse(controller.contains("surfaceOwnsCursor"))
+        XCTAssertTrue(source.contains("NSCursor.pointingHand.set()"))
+        XCTAssertTrue(source.contains("override func constrainFrameRect"))
+        XCTAssertTrue(source.contains("return frameRect"))
+
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let headerStart = try XCTUnwrap(surface.range(of: "private struct AdaptiveDockHeader"))
+        let cacheStart = try XCTUnwrap(surface.range(of: "@MainActor\nprivate final class TerminalIconCache"))
+        let header = String(surface[headerStart.lowerBound..<cacheStart.lowerBound])
+        XCTAssertTrue(header.contains(".clickableCursor()"))
+    }
+
+    func testExpandedSessionHoverFeedbackHasNoIntentDelay() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let start = try XCTUnwrap(source.range(of: "func setHoveredSession(_ id: String?)"))
+        let end = try XCTUnwrap(source.range(of: "\n    func expand()", range: start.lowerBound..<source.endIndex))
+        let method = String(source[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(method.contains("hoveredSessionID = id"))
+        XCTAssertFalse(method.contains("milliseconds(90)"))
+        XCTAssertFalse(method.contains("hoverIntentTask"))
+    }
+
+    func testTerminalDiscoveryDoesNotClaimUnverifiedAdaptersAreConfigured() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/IntegrationBootstrapper.swift"))
+
+        XCTAssertTrue(source.contains("configured: detected && id == \"iterm\""))
+        XCTAssertFalse(source.contains("detected: fileManager.fileExists(atPath: path), configured: true"))
     }
 
     func testDesktopNewSessionMenuWiresAllNativeProviders() throws {

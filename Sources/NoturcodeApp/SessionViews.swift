@@ -9,8 +9,10 @@ private final class PointingHandCursorCoordinator {
 
     private var activeRegions: Set<UUID> = []
     private var eventMonitor: Any?
+    private var cursorIsPushed = false
 
     func setActive(_ active: Bool, regionID: UUID) {
+        let wasActive = !activeRegions.isEmpty
         if active {
             activeRegions.insert(regionID)
             installMonitorIfNeeded()
@@ -20,7 +22,15 @@ private final class PointingHandCursorCoordinator {
                 removeMonitor()
             }
         }
-        scheduleCursorRefresh()
+        let isActive = !activeRegions.isEmpty
+        if !wasActive && isActive {
+            NSCursor.pointingHand.push()
+            cursorIsPushed = true
+        } else if wasActive && !isActive {
+            restoreCursor()
+        } else if isActive {
+            scheduleCursorRefresh()
+        }
     }
 
     private func installMonitorIfNeeded() {
@@ -39,6 +49,12 @@ private final class PointingHandCursorCoordinator {
         self.eventMonitor = nil
     }
 
+    private func restoreCursor() {
+        guard cursorIsPushed else { return }
+        NSCursor.pop()
+        cursorIsPushed = false
+    }
+
     private func scheduleCursorRefresh() {
         // Local monitors run before AppKit applies the window cursor rect.
         // Apply on the next main-loop turn so the clickable cursor wins.
@@ -47,10 +63,13 @@ private final class PointingHandCursorCoordinator {
         }
     }
 
+    func refreshPointingHandIfActive() {
+        guard !activeRegions.isEmpty else { return }
+        scheduleCursorRefresh()
+    }
+
     private func applyCursor() {
-        if activeRegions.isEmpty {
-            NSCursor.arrow.set()
-        } else {
+        if !activeRegions.isEmpty {
             NSCursor.pointingHand.set()
         }
     }
@@ -65,7 +84,10 @@ private final class PointingHandCursorRegionView: NSView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        addCursorRect(bounds, cursor: .pointingHand)
+        let clippedBounds = bounds.intersection(visibleRect)
+        if !clippedBounds.isEmpty {
+            addCursorRect(clippedBounds, cursor: .pointingHand)
+        }
     }
 
     override func updateTrackingAreas() {
@@ -75,29 +97,37 @@ private final class PointingHandCursorRegionView: NSView {
         }
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .cursorUpdate],
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
             owner: self
         )
         addTrackingArea(area)
         cursorTrackingArea = area
     }
 
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.pointingHand.set()
+    override func mouseEntered(with event: NSEvent) {
+        PointingHandCursorCoordinator.shared.refreshPointingHandIfActive()
     }
 
-    override func mouseEntered(with event: NSEvent) {
-        NSCursor.pointingHand.set()
+    override func mouseMoved(with event: NSEvent) {
+        PointingHandCursorCoordinator.shared.refreshPointingHandIfActive()
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        window?.invalidateCursorRects(for: self)
+        // NSWindow invalidation waits for a key-window transition. The notch
+        // panel is non-activating, so rebuild after SwiftUI inserts this view.
+        DispatchQueue.main.async { [weak self] in
+            guard let window = self?.window else { return }
+            window.enableCursorRects()
+            window.resetCursorRects()
+        }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        window?.invalidateCursorRects(for: self)
+        guard let window else { return }
+        window.enableCursorRects()
+        window.resetCursorRects()
     }
 }
 
