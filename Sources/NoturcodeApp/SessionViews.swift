@@ -938,7 +938,18 @@ struct TerminalViewportContent: View {
     }
 
     private var activity: String {
-        session.currentActivity ?? session.lastAgentMessage?.firstNonemptyLine ?? session.state.displayName
+        if let currentActivity = session.currentActivity { return currentActivity }
+        if let providerFailure { return providerFailure.title }
+        return session.lastAgentMessage?.firstNonemptyLine ?? session.state.displayName
+    }
+
+    private var providerFailure: ProviderFailurePresentation? {
+        guard let raw = session.lastAgentMessage else { return nil }
+        return ProviderFailurePresentation.parse(raw)
+    }
+
+    private var providerFailureEventID: String? {
+        providerFailure == nil ? nil : session.lastAgentMessage
     }
 
     private var sessionLabel: String {
@@ -1120,6 +1131,10 @@ struct TerminalViewportContent: View {
                                                 .id(item.id)
                                         }
                                     }
+                                    if let providerFailure {
+                                        ProviderFailureCard(presentation: providerFailure)
+                                            .id("provider-failure")
+                                    }
                                     if let systemMessage = unifiedSystemMessage {
                                         UnifiedSystemMessage(text: systemMessage)
                                     }
@@ -1147,6 +1162,17 @@ struct TerminalViewportContent: View {
                             } else if chatIsNearBottom {
                                 withAnimation(.easeOut(duration: 0.16)) {
                                     proxy.scrollTo("chat-bottom", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: providerFailureEventID) { _, eventID in
+                            guard eventID != nil else { return }
+                            if delivery == .compacting {
+                                delivery = .error(providerFailure?.title ?? "Compaction failed")
+                            }
+                            if chatIsNearBottom {
+                                withAnimation(.easeOut(duration: 0.16)) {
+                                    proxy.scrollTo("provider-failure", anchor: .bottom)
                                 }
                             }
                         }
@@ -1988,6 +2014,38 @@ private struct SessionSummaryCard: View {
                 .stroke(.cyan.opacity(0.10), lineWidth: 0.7)
         }
         .accessibilityIdentifier("session-summary-card")
+    }
+}
+
+private struct ProviderFailureCard: View {
+    let presentation: ProviderFailurePresentation
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.orange.opacity(0.78))
+                .frame(width: 18, height: 18)
+                .background(.orange.opacity(0.08), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.title)
+                    .font(.system(size: 9.5, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.72))
+                Text(presentation.message)
+                    .font(.system(size: 10.5, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.60))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(9)
+        .background(.orange.opacity(0.035), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(.orange.opacity(0.11), lineWidth: 0.7)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("provider-failure-card")
     }
 }
 

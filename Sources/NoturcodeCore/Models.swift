@@ -46,6 +46,60 @@ public enum SessionState: String, Codable, CaseIterable, Sendable {
     }
 }
 
+public struct ProviderFailurePresentation: Equatable, Sendable {
+    public let title: String
+    public let message: String
+
+    public init(title: String, message: String) {
+        self.title = title
+        self.message = message
+    }
+
+    public static func parse(_ raw: String) -> ProviderFailurePresentation? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercase = trimmed.lowercased()
+        let isProviderEnvelope = lowercase.contains("invalid_request_error")
+            || lowercase.contains("rate_limit_error")
+            || lowercase.range(of: #"^[45][0-9][0-9]\s*\{"#, options: .regularExpression) != nil
+        guard isProviderEnvelope || lowercase.contains("prompt is too long") else { return nil }
+
+        let providerMessage = nestedProviderMessage(in: trimmed)
+        let normalized = (providerMessage ?? trimmed).lowercased()
+        if normalized.contains("prompt is too long") {
+            return ProviderFailurePresentation(
+                title: "Context limit reached",
+                message: "This session is larger than the provider allows. If compaction cannot complete, continue in a new session."
+            )
+        }
+        if normalized.contains("rate limit") || normalized.contains("rate_limit") {
+            return ProviderFailurePresentation(
+                title: "Rate limit reached",
+                message: "The provider temporarily rejected this request. Wait briefly, then try again."
+            )
+        }
+        if let providerMessage, !providerMessage.isEmpty {
+            return ProviderFailurePresentation(
+                title: "Provider request failed",
+                message: String(providerMessage.prefix(240))
+            )
+        }
+        return ProviderFailurePresentation(
+            title: "Provider request failed",
+            message: "The provider rejected this request. Open the CLI for additional recovery options."
+        )
+    }
+
+    private static func nestedProviderMessage(in raw: String) -> String? {
+        guard let start = raw.firstIndex(of: "{") else { return nil }
+        let json = String(raw[start...])
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = object["error"] as? [String: Any],
+              let message = error["message"] as? String else { return nil }
+        return message.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 public struct SessionKey: Hashable, Codable, Sendable, CustomStringConvertible {
     public var source: AgentSource
     public var sessionID: String

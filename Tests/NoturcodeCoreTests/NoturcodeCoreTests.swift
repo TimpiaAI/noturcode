@@ -302,6 +302,26 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(DurationFormatting.tokens(1_250_000), "1.2M tok")
     }
 
+    func testProviderFailurePresentationTurnsCompactionJSONIntoAChatMessage() throws {
+        let raw = #"400 {"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 1000841 tokens > 1000000 maximum"},"request_id":"req_private"}"#
+        let presentation = try XCTUnwrap(ProviderFailurePresentation.parse(raw))
+
+        XCTAssertEqual(presentation.title, "Context limit reached")
+        XCTAssertTrue(presentation.message.contains("larger than the provider allows"))
+        XCTAssertFalse(presentation.message.contains("req_private"))
+
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let views = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+        XCTAssertTrue(views.contains("ProviderFailureCard(presentation:"))
+        XCTAssertTrue(views.contains(".onChange(of: providerFailureEventID)"))
+        let friendlyFailure = try XCTUnwrap(views.range(of: "if let providerFailure { return providerFailure.title }"))
+        let rawFallback = try XCTUnwrap(views.range(of: "session.lastAgentMessage?.firstNonemptyLine ?? session.state.displayName"))
+        XCTAssertLessThan(friendlyFailure.lowerBound, rawFallback.lowerBound)
+    }
+
     func testTranscriptTokenCounterDeduplicatesClaudeAndUsesCodexCumulativeTotal() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
