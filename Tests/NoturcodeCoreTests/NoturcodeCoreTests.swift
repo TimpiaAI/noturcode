@@ -356,6 +356,27 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(AvatarIdentity(name: "anything").saturation, 0.52)
     }
 
+    func testActiveSubagentsBelongToCurrentPromptOnly() {
+        let promptTime = Date(timeIntervalSince1970: 100)
+        let session = TrackedSession(
+            key: SessionKey(source: .claude, sessionID: "agents"),
+            name: "agents",
+            terminal: TerminalTarget(sessionID: "w0t1:AGENTS"),
+            sourceProcessID: nil,
+            cwd: nil,
+            connectedAt: Date(timeIntervalSince1970: 1),
+            lastPromptAt: promptTime,
+            stateChangedAt: promptTime,
+            subagents: [
+                SubagentSnapshot(id: "old", type: "agent", state: .working, activity: "old", startedAt: .distantPast, updatedAt: promptTime.addingTimeInterval(-1)),
+                SubagentSnapshot(id: "current", type: "agent", state: .working, activity: "current", startedAt: promptTime, updatedAt: promptTime.addingTimeInterval(1)),
+                SubagentSnapshot(id: "done", type: "agent", state: .done, activity: "done", startedAt: promptTime, updatedAt: promptTime.addingTimeInterval(2))
+            ]
+        )
+
+        XCTAssertEqual(session.activeSubagents.map(\.id), ["current"])
+    }
+
     func testDurationAndTokenFormatting() {
         let start = Date(timeIntervalSince1970: 100)
         XCTAssertEqual(DurationFormatting.compact(from: start, to: start.addingTimeInterval(4_088)), "1h 8m")
@@ -1236,6 +1257,7 @@ final class NoturcodeCoreTests: XCTestCase {
         let row = String(source[rowStart.lowerBound..<nextStart.lowerBound])
 
         XCTAssertTrue(row.contains(".fixedSize(horizontal: true, vertical: false)"))
+        XCTAssertTrue(row.contains("if session.key.source != .codex"))
         XCTAssertFalse(row.contains("if let tokens = session.tokens"))
         XCTAssertFalse(row.contains("DurationFormatting.tokens"))
     }

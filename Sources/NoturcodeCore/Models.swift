@@ -239,7 +239,10 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
     }
 
     public var activeSubagents: [SubagentSnapshot] {
-        subagents.filter { $0.state == .working || $0.state == .askingYou }
+        subagents.filter {
+            ($0.state == .working || $0.state == .askingYou)
+                && $0.updatedAt >= lastPromptAt
+        }
     }
 
     public var toolActivities: [ActivitySnapshot] {

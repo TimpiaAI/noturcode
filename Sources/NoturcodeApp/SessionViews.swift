@@ -525,7 +525,7 @@ private struct SessionRow: View {
             subject
         ]
         if let activity = session.currentActivity { parts.append(activity) }
-        if !session.subagents.isEmpty { parts.append("\(session.activeSubagents.count) active agents") }
+        if !session.activeSubagents.isEmpty { parts.append("\(session.activeSubagents.count) active agents") }
         return parts.joined(separator: ", ")
     }
 
@@ -545,7 +545,9 @@ private struct SessionRow: View {
                 HStack(spacing: 9) {
                     SessionMarble(session: session, size: 22, animate: isHovered)
                     HStack(spacing: 5) {
-                        ProviderMark(source: session.key.source, size: 13)
+                        if session.key.source != .codex {
+                            ProviderMark(source: session.key.source, size: 13)
+                        }
                         Text(session.name)
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(.white.opacity(0.95))
