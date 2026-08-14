@@ -526,6 +526,18 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(notch.contains("CollapsedCompletionOutline"))
     }
 
+    func testEveryNativeBrandMarkUsesTheCurrentApplicationIcon() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let views = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+
+        XCTAssertTrue(views.contains("NSApplication.shared.applicationIconImage"))
+        XCTAssertTrue(views.contains("Image(nsImage: appIcon)"))
+        XCTAssertFalse(views.contains("private struct NoturcodeGlyph"))
+    }
+
     func testCompletionMarblesKeepOneDiameterAndOnlyChangeOutlineColor() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

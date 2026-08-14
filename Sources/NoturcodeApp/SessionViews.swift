@@ -6,37 +6,17 @@ import UniformTypeIdentifiers
 struct NoturcodeBrandMark: View {
     let size: CGFloat
 
+    private var appIcon: NSImage {
+        NSApplication.shared.applicationIconImage
+    }
+
     var body: some View {
-        NoturcodeGlyph()
+        Image(nsImage: appIcon)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
             .accessibilityHidden(true)
-    }
-}
-
-private struct NoturcodeGlyph: View {
-    var body: some View {
-        GeometryReader { geometry in
-            let width = geometry.size.width
-            let height = geometry.size.height
-            Path { path in
-                path.move(to: CGPoint(x: width * 0.25, y: height * 0.74))
-                path.addLine(to: CGPoint(x: width * 0.25, y: height * 0.28))
-                path.addLine(to: CGPoint(x: width * 0.75, y: height * 0.72))
-                path.addLine(to: CGPoint(x: width * 0.75, y: height * 0.26))
-            }
-            .stroke(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.44, green: 0.96, blue: 0.92),
-                        Color(red: 0.20, green: 0.62, blue: 1.00),
-                        Color(red: 0.55, green: 0.38, blue: 0.96)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                style: StrokeStyle(lineWidth: width * 0.15, lineCap: .round, lineJoin: .round)
-            )
-        }
     }
 }
 
