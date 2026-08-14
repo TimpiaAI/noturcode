@@ -966,7 +966,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
     }
 
-    func testCompactPillShowsBrandAndBoundedLiveActivity() throws {
+    func testCompactPillShowsBrandAndEverySessionNameWithoutToolActivity() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -975,13 +975,13 @@ final class NoturcodeCoreTests: XCTestCase {
         let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
         XCTAssertTrue(surface.contains("NoturcodeBrandMark(size:"))
-        XCTAssertTrue(surface.contains("private var compactActivityText: String"))
-        XCTAssertTrue(surface.contains("session.currentActivity"))
         XCTAssertTrue(surface.contains("private func sessionChip(_ session: TrackedSession)"))
         XCTAssertTrue(surface.contains("ForEach(values)"))
         XCTAssertTrue(surface.contains("Text(session.name)"))
         XCTAssertTrue(surface.contains(".lineLimit(1)"))
-        XCTAssertTrue(surface.contains(".contentTransition(.interpolate)"))
+        XCTAssertTrue(surface.contains(".frame(maxHeight: .infinity, alignment: .center)"))
+        XCTAssertFalse(surface.contains("compactActivityText"))
+        XCTAssertFalse(surface.contains("session.currentActivity"))
         XCTAssertTrue(coordinator.contains("CGFloat(sessionCount) * 88"))
         XCTAssertTrue(coordinator.contains("max(340"))
     }

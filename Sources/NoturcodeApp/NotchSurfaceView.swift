@@ -210,17 +210,8 @@ private struct RestIndicatorView: View {
             ?? sessions.first
     }
 
-    private var compactActivityText: String {
-        guard let session = primarySession else { return "Connected" }
-        let raw = session.currentActivity?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let raw, !raw.isEmpty else { return session.state.displayName }
-
-        // The compact surface describes the operation, never its command,
-        // arguments, paths, or prompt contents.
-        let firstLine = raw.components(separatedBy: .newlines).first ?? raw
-        let operation = firstLine.components(separatedBy: " · ").first ?? firstLine
-        return String(operation.prefix(32))
+    private var sessionNames: String {
+        sessions.map(\.name).joined(separator: ", ")
     }
 
     var body: some View {
@@ -243,12 +234,9 @@ private struct RestIndicatorView: View {
             }
         }
         .padding(.horizontal, metrics.hasHardwareNotch ? 9 : 14)
-        .frame(maxHeight: metrics.neckHeight)
+        .frame(maxHeight: .infinity, alignment: .center)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            "Noturcode, \(sessions.count) connected sessions, \(primarySession?.name ?? "no session"), \(compactActivityText)"
-        )
-        .animation(.easeOut(duration: 0.14), value: compactActivityText)
+        .accessibilityLabel("Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
     }
 
@@ -277,24 +265,15 @@ private struct RestIndicatorView: View {
                 animate: session.id == animatedSessionID,
                 completionIsUnread: completionReads.isUnread(session)
             )
-            VStack(alignment: .leading, spacing: 0) {
-                Text(session.name)
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.92))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if isPrimary {
-                    Text(compactActivityText)
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.52))
-                        .lineLimit(1)
-                        .contentTransition(.interpolate)
-                }
-            }
+            Text(session.name)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.92))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
-        .frame(maxWidth: isPrimary ? 116 : 88, alignment: .leading)
+        .frame(maxWidth: 96, alignment: .leading)
         .padding(.horizontal, 7)
-        .padding(.vertical, isPrimary ? 4 : 6)
+        .padding(.vertical, 6)
         .background(
             Capsule(style: .continuous)
                 .fill(.white.opacity(isPrimary ? 0.075 : 0.035))
