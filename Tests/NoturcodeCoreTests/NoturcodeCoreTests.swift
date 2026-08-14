@@ -1602,7 +1602,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(pointer.contains("invalidateCursorRects"))
 
         let interaction = try XCTUnwrap(pointer.range(of: "panel.ignoresMouseEvents = ignoresMouseEvents"))
-        let cursor = try XCTUnwrap(pointer.range(of: "updateSurfaceCursor(inside: inside)"))
+        let cursor = try XCTUnwrap(pointer.range(of: "updatePanelKeyForCursor(inside: inside)"))
         XCTAssertLessThan(interaction.lowerBound, cursor.lowerBound)
     }
 
@@ -1631,18 +1631,18 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(controller.contains("panel.isFloatingPanel = true"))
         XCTAssertTrue(controller.contains("panel.becomesKeyOnlyIfNeeded = true"))
         XCTAssertTrue(controller.contains("panel.allowsToolTipsWhenApplicationIsInactive = true"))
-        XCTAssertTrue(source.contains("final class NotchHostingView: NSHostingView<NotchSurfaceView>"))
-        XCTAssertTrue(source.contains("addCursorRect(clickableBounds, cursor: .pointingHand)"))
+        XCTAssertFalse(source.contains("final class NotchHostingView: NSHostingView<NotchSurfaceView>"))
+        XCTAssertFalse(source.contains("addCursorRect(clickableBounds, cursor: .pointingHand)"))
         XCTAssertTrue(controller.contains("panel.enableCursorRects()"))
         XCTAssertTrue(controller.contains("panel.resetCursorRects()"))
-        XCTAssertTrue(controller.contains("func updateSurfaceCursor(inside: Bool)"))
-        XCTAssertTrue(source.contains("private final class NotchSurfaceCursorCoordinator"))
-        XCTAssertTrue(source.contains("private var activePanelIDs: Set<UUID> = []"))
-        XCTAssertTrue(source.contains("restoreTask?.cancel()"))
-        XCTAssertTrue(controller.contains("NotchSurfaceCursorCoordinator.shared.setActive(inside, panelID: cursorPanelID)"))
+        XCTAssertFalse(controller.contains("func updateSurfaceCursor(inside: Bool)"))
+        XCTAssertFalse(source.contains("private final class NotchSurfaceCursorCoordinator"))
+        XCTAssertTrue(controller.contains("panel.makeKey()"))
+        XCTAssertTrue(controller.contains("panel.resignKey()"))
+        XCTAssertTrue(controller.contains("surfaceMadeKeyForCursor"))
+        XCTAssertFalse(controller.contains("NSApp.activate"))
         XCTAssertFalse(controller.contains("cursorBeforeSurface"))
         XCTAssertFalse(controller.contains("surfaceOwnsCursor"))
-        XCTAssertTrue(source.contains("NSCursor.pointingHand.set()"))
         XCTAssertTrue(source.contains("override func constrainFrameRect"))
         XCTAssertTrue(source.contains("return frameRect"))
 
@@ -1650,7 +1650,7 @@ final class NoturcodeCoreTests: XCTestCase {
         let headerStart = try XCTUnwrap(surface.range(of: "private struct AdaptiveDockHeader"))
         let cacheStart = try XCTUnwrap(surface.range(of: "@MainActor\nprivate final class TerminalIconCache"))
         let header = String(surface[headerStart.lowerBound..<cacheStart.lowerBound])
-        XCTAssertTrue(header.contains(".clickableCursor()"))
+        XCTAssertEqual(header.components(separatedBy: ".clickableCursor()").count - 1, 1)
     }
 
     func testExpandedSessionHoverFeedbackHasNoIntentDelay() throws {

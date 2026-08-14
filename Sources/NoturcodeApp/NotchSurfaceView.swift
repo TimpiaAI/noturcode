@@ -310,7 +310,6 @@ private struct AdaptiveDockHeader: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(isExpanded ? "Noturcode quote" : "Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
-        .clickableCursor()
         .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
     }
 
