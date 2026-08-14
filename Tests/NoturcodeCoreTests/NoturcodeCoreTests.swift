@@ -1034,6 +1034,10 @@ final class NoturcodeCoreTests: XCTestCase {
     func testExactITermNavigationScriptCompilesAndVerifiesUUID() throws {
         let source = ITermNavigationScript.source
         XCTAssertTrue(source.contains("set wantedID to targetID as text"))
+        XCTAssertTrue(source.contains("set targetWindowID to id of terminalWindow"))
+        XCTAssertTrue(source.contains("first window whose id is targetWindowID"))
+        XCTAssertTrue(source.contains("select targetWindow"))
+        XCTAssertTrue(source.contains("set targetWindow to current window"))
         XCTAssertTrue(source.contains("is wantedID"))
         XCTAssertFalse(source.contains("is targetID"))
         XCTAssertFalse(source.contains("contents of"))
