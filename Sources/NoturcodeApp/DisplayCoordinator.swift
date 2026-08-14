@@ -14,7 +14,7 @@ struct NotchMetrics: Equatable, Sendable {
     let neckHeight: CGFloat
 
     var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }
-    var dockRailHeight: CGFloat { 42 }
+    var dockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }
     var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }
     var dockContentTopInset: CGFloat { hasHardwareNotch ? neckHeight + notchShoulderClearance : 0 }
     var collapsedHeight: CGFloat { dockContentTopInset + dockRailHeight }

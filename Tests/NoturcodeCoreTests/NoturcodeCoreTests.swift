@@ -801,7 +801,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(notch.contains("sessionStrip(working)"))
         XCTAssertFalse(notch.contains("sessionStrip(attention)"))
         XCTAssertFalse(notch.contains("Color.clear.frame(width: metrics.neckWidth"))
-        XCTAssertTrue(coordinator.contains("var dockRailHeight: CGFloat { 42 }"))
+        XCTAssertTrue(coordinator.contains("var dockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }"))
         XCTAssertTrue(coordinator.contains("var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }"))
         XCTAssertTrue(coordinator.contains("neckHeight + notchShoulderClearance"))
         XCTAssertTrue(coordinator.contains("var collapsedHeight: CGFloat"))
