@@ -49,6 +49,54 @@ final class SocketIntegrationTests: XCTestCase {
         wait(for: [received], timeout: 1)
     }
 
+    func testPairedRemoteHookRoundTripsOverForwardableSocket() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nc-remote-\(UUID().uuidString)", isDirectory: true)
+        let socketPath = "/tmp/nc-remote-\(UUID().uuidString.prefix(8)).sock"
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(atPath: socketPath)
+        }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let pairingStore = RemotePairingStore(directoryURL: root.appendingPathComponent("pairing"))
+        let processor = RemoteBridgeProcessor(pairings: pairingStore)
+        let code = try pairingStore.createCode(hostHint: "fixture-vps")
+        let pairResponse = processor.pair(RemotePairRequest(code: code.code, deviceID: "device-1", deviceName: "Fixture"))
+        let token = try XCTUnwrap(pairResponse.token)
+        let received = expectation(description: "normalized remote event")
+
+        let server = UnixSocketServer(path: socketPath) { data in
+            guard let request = try? JSONDecoder().decode(RemoteHookRequest.self, from: data) else {
+                return Data(#"{"ok":false}"#.utf8)
+            }
+            let result = processor.process(request)
+            XCTAssertEqual(result.events.first?.kind, .connect)
+            XCTAssertEqual(result.events.first?.terminalSessionID, "w0t1:REMOTE")
+            received.fulfill()
+            return try! JSONEncoder().encode(result.response)
+        }
+        try server.start()
+        defer { server.stop() }
+
+        let request = RemoteHookRequest(
+            token: token,
+            deviceID: "device-1",
+            source: .codex,
+            payload: .object([
+                "hook_event_name": .string("UserPromptSubmit"),
+                "session_id": .string("remote-1"),
+                "prompt": .string("nc remote")
+            ]),
+            environment: ["PWD": "/srv/app"],
+            terminalSessionID: "w0t1:REMOTE"
+        )
+        let responseData = try UnixSocketClient.send(try JSONEncoder().encode(request), path: socketPath)
+        let response = try JSONDecoder().decode(RemoteHookResponse.self, from: responseData)
+
+        XCTAssertTrue(response.ok)
+        wait(for: [received], timeout: 1)
+    }
+
     func testProcessInspectionReturnsCurrentExecutable() throws {
         let current = try XCTUnwrap(ProcessAncestry.inspect(pid: Int32(ProcessInfo.processInfo.processIdentifier)))
         XCTAssertEqual(current.pid, Int32(ProcessInfo.processInfo.processIdentifier))

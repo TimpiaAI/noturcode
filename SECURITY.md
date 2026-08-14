@@ -38,3 +38,6 @@ Changes should preserve these boundaries:
 - Update and distribution artifacts must be signed and verified.
 - Logs must avoid secrets and private transcript content by default.
 - Network communication must be explicit and documented.
+- Remote pairing codes must expire, work once, and produce a separate durable token.
+- Remote tokens must use private file permissions; the Mac stores only token hashes.
+- VPS events must use the explicit SSH Unix-socket tunnel created by `nc ssh`, never a public listener.

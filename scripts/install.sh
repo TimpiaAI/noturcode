@@ -84,6 +84,7 @@ done
 "$bridge_destination" doctor
 print "installed app: $app_destination"
 print "installed bridge: $bridge_destination"
+print "interactive remote CLI: source '$HOME/.config/noturcode/shell.zsh' then run nc"
 if [[ -d "$app_backup_dir" ]]; then
   print "previous app backup: $app_backup_dir"
 fi

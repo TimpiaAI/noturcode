@@ -104,6 +104,39 @@ final class IntegrationBootstrapper {
                 backupDirectory: backup,
                 changed: &changed
             )
+            let cli = support.appendingPathComponent("bin/noturcode-cli")
+            try replaceFile(
+                from: integrations.appendingPathComponent("noturcode-cli.zsh"),
+                to: cli,
+                permissions: 0o755,
+                home: home,
+                backupDirectory: backup,
+                changed: &changed
+            )
+            let remoteAgent = support.appendingPathComponent("remote/noturcode-agent.py")
+            try replaceFile(
+                from: integrations.appendingPathComponent("noturcode-agent.py"),
+                to: remoteAgent,
+                permissions: 0o755,
+                home: home,
+                backupDirectory: backup,
+                changed: &changed
+            )
+            let shellIntegration = home.appendingPathComponent(".config/noturcode/shell.zsh")
+            try replaceFile(
+                from: integrations.appendingPathComponent("noturcode-shell.zsh"),
+                to: shellIntegration,
+                permissions: 0o600,
+                home: home,
+                backupDirectory: backup,
+                changed: &changed
+            )
+            try installZshSource(
+                home: home,
+                shellIntegration: shellIntegration,
+                backupDirectory: backup,
+                changed: &changed
+            )
 
             let harnesses = discovery.filter { $0.kind == .harness && $0.detected }.map(\.id)
             if harnesses.contains("claude") {
@@ -236,6 +269,20 @@ final class IntegrationBootstrapper {
                               backupDirectory: URL, changed: inout [String]) throws {
         try replaceFile(from: source, to: destination, permissions: 0o644,
                         home: home, backupDirectory: backupDirectory, changed: &changed)
+    }
+
+    private func installZshSource(home: URL, shellIntegration: URL, backupDirectory: URL,
+                                  changed: inout [String]) throws {
+        let profile = home.appendingPathComponent(".zshrc")
+        let marker = "# Noturcode interactive CLI"
+        let sourceLine = "[[ -r \"$HOME/.config/noturcode/shell.zsh\" ]] && source \"$HOME/.config/noturcode/shell.zsh\""
+        let existing = (try? String(contentsOf: profile, encoding: .utf8)) ?? ""
+        guard !existing.contains(sourceLine) else { return }
+        var updated = existing
+        if !updated.isEmpty, !updated.hasSuffix("\n") { updated += "\n" }
+        updated += "\n\(marker)\n\(sourceLine)\n"
+        try writeIfChanged(Data(updated.utf8), to: profile, permissions: 0o600,
+                           home: home, backupDirectory: backupDirectory, changed: &changed)
     }
 
     private func replaceFile(from source: URL, to destination: URL, permissions: Int, home: URL,

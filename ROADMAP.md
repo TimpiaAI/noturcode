@@ -10,15 +10,16 @@ Noturcode publishes capabilities only after an end-to-end test proves them.
 - completion/attention notifications
 - local files, Markdown, code, images, models, and token totals
 - Claude parent/subagent conversation navigation
+- paired SSH hook transport through the interactive `nc` command, with fixture coverage
 
 ## Next
 
 - signed and notarized releases with reproducible checksums
 - integration Doctor with preview, repair, restore, and ownership manifest
-- reliable tmux and SSH session identity/forwarding
+- broader live-host verification for tmux and paired SSH identity/forwarding
 - executable-fixture and live verification for Terminal, Ghostty, WezTerm, kitty, tmux, and Zellij adapters
 - exact Warp pane navigation and prompt delivery
-- real remote SSH transport and forwarding
+- remote transcript mirroring beyond hook payloads
 - Codex subagent/team parity as upstream events become available
 - existing-session attach, images, tokens, and subagent parity for Gemini, Grok, and OpenCode
 - performance budgets for animation, transcript polling, and multiple displays

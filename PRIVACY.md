@@ -18,9 +18,13 @@ Noturcode stores disposable metadata under `~/Library/Application Support/Noturc
 
 Noturcode does not copy complete transcripts into its own database. Claude Code and Codex remain the owners of their original JSONL files.
 
+For a paired VPS, the remote helper stores its device ID and pairing token under `~/.config/noturcode/pair.json` with mode `0600`. The Mac stores only a SHA-256 token hash under `~/Library/Application Support/Noturcode/remote-pairing/`.
+
 ## Network behavior
 
 The core app and bridge do not send session data to a Noturcode server. There is no Noturcode server.
+
+When you explicitly open a paired VPS through `nc ssh`, remote hook payloads travel through that SSH connection to the Mac's user-only Unix socket. Noturcode opens no public listener. The helper fails open when the tunnel is not present. Full remote transcript files are not copied by the current implementation.
 
 **Ask Noturcode is an explicit exception:** after you select terminal text, open the context command, type a question, and press Ask, Noturcode runs your locally installed Claude CLI. That CLI may send the selected excerpt and question to Anthropic according to your Claude configuration and Anthropic's terms. The UI identifies Claude as the destination before submission. Nothing is submitted merely by opening the popup.
 

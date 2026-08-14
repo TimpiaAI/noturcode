@@ -58,7 +58,7 @@ The table is intentionally capability-by-capability. “Detected” does not mea
 | WezTerm / kitty | Partial, unverified | Partial, unverified | Uses native pane/window IDs and local CLIs. |
 | Warp | App activation only | No | Exact pane selection is not implemented. |
 | tmux / Zellij | Partial, local only | Partial, local only | Uses captured local socket/session and pane IDs. |
-| SSH | No | No | Metadata is captured. Remote transport and forwarding are not implemented. |
+| SSH through `nc ssh` | Experimental; fixture-verified | Experimental; fixture-verified | One-time pairing and an SSH Unix-socket tunnel. Live host coverage is still limited. |
 
 ## Install from source
 
@@ -80,6 +80,28 @@ Requirements:
 - iTerm2 for exact pane navigation and prompt delivery
 
 The installer builds a universal app, ad-hoc signs the local build, installs it under `~/Applications`, and sets up integrations because running the installer is an explicit action. A normal app launch never edits harness configuration. It never closes iTerm2.
+
+## Pair a VPS at no extra cost
+
+The installer adds a safe `nc` shell function. With no arguments, `nc` opens a small interactive guide. Existing netcat commands still go to `/usr/bin/nc`.
+
+Open a new shell after installation, or load the command now:
+
+```sh
+source ~/.config/noturcode/shell.zsh
+nc
+```
+
+Choose **Pair a VPS** once. Noturcode copies a dependency-free Python helper over your existing SSH connection, shows a six-digit one-time code, backs up detected remote hook files, and configures Claude Code, Codex, and Gemini CLI when found. Then choose **Open an SSH workspace** whenever you work on that server.
+
+```text
+nc
+  1. Pair a VPS
+  2. Open an SSH workspace
+  3. Check setup
+```
+
+The remote helper runs as your SSH user. It needs Python 3 and OpenSSH, but no root account, public port, npm package, cloud relay, or new server. The durable token is stored as mode `0600` on the VPS and only its SHA-256 hash is stored on the Mac. Agent hooks fail open if the tunnel is absent. See [the remote setup and security guide](docs/REMOTE.md).
 
 ## Connect a session
 
@@ -111,7 +133,7 @@ See [PRIVACY.md](PRIVACY.md) for the exact local data flow and [SECURITY.md](SEC
 ## Architecture
 
 ```text
-Claude/Codex hooks ----> noturcode-bridge ----> user-only Unix socket
+local hooks -----------> noturcode-bridge ----> user-only Unix socket
        |                                             |
        | local JSONL                                 v
        +--------------------------------------> native Swift app
@@ -119,6 +141,8 @@ Claude/Codex hooks ----> noturcode-bridge ----> user-only Unix socket
                          notch + notifications + conversation workspace
                                                      |
                                       explicit click/send via iTerm2 API
+
+remote hooks -> paired helper -> SSH Unix socket tunnel -> same local socket
 ```
 
 The bridge is fail-open: inability to reach Noturcode must not block the coding harness. Session state is disposable local metadata, while agent transcripts remain in their original Claude/Codex locations. More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -158,7 +182,7 @@ The app and local session metadata are retained unless you explicitly request da
 
 ## Project status
 
-Noturcode is early software. Claude Code and Codex on local iTerm2 panes are the verified core. Multi-terminal exact jump, SSH forwarding, signed updates, and broader harness transcript parity remain roadmap work. See [ROADMAP.md](ROADMAP.md).
+Noturcode is early software. Claude Code and Codex on local iTerm2 panes are the verified core. Paired SSH has fixture coverage but still needs broader live-host verification. Multi-terminal exact jump, signed updates, and broader harness transcript parity remain roadmap work. See [ROADMAP.md](ROADMAP.md).
 
 Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), read the small [architecture guide](docs/ARCHITECTURE.md), and choose an issue that has a reproducible acceptance test.
 

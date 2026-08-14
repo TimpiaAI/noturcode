@@ -54,6 +54,52 @@ final class NoturcodeCoreTests: XCTestCase {
         ))
     }
 
+    func testTranscriptRunStateUsesTheLatestRelevantJSONLEvent() throws {
+        let prompt = ISO8601DateFormatter().date(from: "2026-08-14T08:00:00Z")!
+        let trailingMetadata = (0..<2_000)
+            .map { "{\"type\":\"progress\",\"timestamp\":\"2026-08-14T08:00:11Z\",\"index\":\($0)}" }
+            .joined(separator: "\n")
+        let finished = """
+        {"type":"user","timestamp":"2026-08-14T08:00:00Z","message":{"content":"fix it"}}
+        {"type":"assistant","timestamp":"2026-08-14T08:00:10Z","message":{"stop_reason":"end_turn"}}
+        \(trailingMetadata)
+        """
+        XCTAssertTrue(TranscriptRunStateDetector.turnCompleted(
+            data: Data(finished.utf8),
+            source: .claude,
+            after: prompt
+        ))
+
+        let resumed = finished + "\n" + """
+        {"type":"user","timestamp":"2026-08-14T08:00:12Z","message":{"content":"continue"}}
+        """
+        XCTAssertFalse(TranscriptRunStateDetector.turnCompleted(
+            data: Data(resumed.utf8),
+            source: .claude,
+            after: prompt
+        ))
+    }
+
+    func testTranscriptRevisionChangesOnlyWhenFileChanges() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-transcript-revision-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try Data("first\n".utf8).write(to: url)
+        let first = try XCTUnwrap(TranscriptRunStateDetector.revision(atPath: url.path))
+        let unchanged = try XCTUnwrap(TranscriptRunStateDetector.revision(atPath: url.path))
+        XCTAssertEqual(first, unchanged)
+
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data("second\n".utf8))
+        try handle.close()
+
+        let changed = try XCTUnwrap(TranscriptRunStateDetector.revision(atPath: url.path))
+        XCTAssertNotEqual(first, changed)
+        XCTAssertGreaterThan(changed.size, first.size)
+    }
+
     func testAppReconcilesMissedTranscriptCompletionWithoutHover() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -63,6 +109,9 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(appModel.contains("startTranscriptReconciliation()"))
         XCTAssertTrue(appModel.contains("Task.detached(priority: .utility)"))
+        XCTAssertTrue(appModel.contains("session.key.source == .claude"))
+        XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.revision"))
+        XCTAssertTrue(appModel.contains("previousFingerprints[candidate.key] != fingerprint"))
         XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.turnCompleted"))
         XCTAssertTrue(appModel.contains("kind: .responseCompleted"))
     }
@@ -158,6 +207,126 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(BridgeEnvelope.self, from: data))
     }
 
+    func testRemotePairingCodeIsSingleUseAndStoresOnlyATokenHash() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-pairing-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let store = RemotePairingStore(directoryURL: root, now: { now })
+
+        let pairing = try store.createCode(hostHint: "demo-vps")
+        XCTAssertEqual(pairing.code.count, 6)
+        let token = try store.pair(code: pairing.code, deviceID: "device-1", deviceName: "Demo VPS")
+
+        XCTAssertTrue(store.validates(token: token, deviceID: "device-1"))
+        XCTAssertFalse(store.validates(token: token + "wrong", deviceID: "device-1"))
+        XCTAssertThrowsError(try store.pair(code: pairing.code, deviceID: "device-2", deviceName: "Other"))
+        let stored = try String(contentsOf: root.appendingPathComponent("devices/device-1.json"), encoding: .utf8)
+        XCTAssertFalse(stored.contains(token))
+        XCTAssertEqual(
+            (try FileManager.default.attributesOfItem(atPath: root.appendingPathComponent("devices/device-1.json").path)[.posixPermissions] as? NSNumber)?.intValue,
+            0o600
+        )
+    }
+
+    func testRemotePairingRejectsAnExpiredCode() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-pairing-expiry-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        final class Clock: @unchecked Sendable {
+            var value = Date(timeIntervalSince1970: 1_800_000_000)
+        }
+        let clock = Clock()
+        let store = RemotePairingStore(directoryURL: root, now: { clock.value })
+        let pairing = try store.createCode(hostHint: "demo-vps", lifetime: 10)
+        clock.value = clock.value.addingTimeInterval(11)
+
+        XCTAssertThrowsError(try store.pair(code: pairing.code, deviceID: "device-1", deviceName: "Demo")) { error in
+            XCTAssertEqual(error.localizedDescription, "The pairing code expired. Run nc and create a new code.")
+        }
+    }
+
+    func testRemoteHookRequestRoundTripsWithTerminalIdentity() throws {
+        let request = RemoteHookRequest(
+            token: "private-test-token",
+            deviceID: "vps-1",
+            source: .claude,
+            payload: .object(["hook_event_name": .string("Stop"), "session_id": .string("remote-1")]),
+            environment: ["SSH_CONNECTION": "127.0.0.1 50000 127.0.0.1 22"],
+            sourceProcessID: 42,
+            terminalSessionID: "w0t1:REMOTE"
+        )
+        let decoded = try JSONDecoder().decode(RemoteHookRequest.self, from: JSONEncoder().encode(request))
+        XCTAssertEqual(decoded, request)
+        XCTAssertEqual(decoded.type, "remoteHook")
+    }
+
+    func testRemoteBridgeRejectsUnknownDeviceThenNormalizesPairedHook() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-remote-processor-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let pairings = RemotePairingStore(directoryURL: root, now: { now })
+        let processor = RemoteBridgeProcessor(pairings: pairings)
+        let unpaired = RemoteHookRequest(
+            token: "bad",
+            deviceID: "vps-1",
+            source: .claude,
+            payload: .object(["hook_event_name": .string("UserPromptSubmit"), "prompt": .string("/nc remote")]),
+            environment: [:],
+            terminalSessionID: "w0t1:REMOTE"
+        )
+        XCTAssertFalse(processor.process(unpaired, now: now).response.ok)
+
+        let code = try pairings.createCode(hostHint: "vps")
+        let pairResponse = processor.pair(RemotePairRequest(code: code.code, deviceID: "vps-1", deviceName: "VPS"))
+        let token = try XCTUnwrap(pairResponse.token)
+        let paired = RemoteHookRequest(
+            token: token,
+            deviceID: "vps-1",
+            source: .claude,
+            payload: .object([
+                "hook_event_name": .string("UserPromptSubmit"),
+                "session_id": .string("remote-session"),
+                "prompt": .string("/nc remote")
+            ]),
+            environment: ["PWD": "/srv/app"],
+            sourceProcessID: 33,
+            terminalSessionID: "w0t1:REMOTE"
+        )
+        let result = processor.process(paired, now: now)
+
+        XCTAssertTrue(result.response.ok)
+        XCTAssertEqual(result.events.count, 1)
+        XCTAssertEqual(result.events.first?.kind, .connect)
+        XCTAssertEqual(result.events.first?.name, "remote")
+        XCTAssertEqual(result.events.first?.terminalSessionID, "w0t1:REMOTE")
+        XCTAssertEqual(
+            result.response.hookOutput,
+            .object(["decision": .string("block"), "reason": .string("Noturcode connected \"remote\".")])
+        )
+    }
+
+    func testInteractiveNCIntegrationPreservesNetcatAndGuidesPairing() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let shell = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-shell.zsh"))
+        let cli = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-cli.zsh"))
+        let agent = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-agent.py"))
+
+        XCTAssertTrue(shell.contains("nc()"))
+        XCTAssertTrue(shell.contains("command /usr/bin/nc"))
+        XCTAssertTrue(cli.contains("Pair a VPS"))
+        XCTAssertTrue(cli.contains("Open an SSH workspace"))
+        XCTAssertTrue(cli.contains("StreamLocalBindUnlink=yes"))
+        XCTAssertTrue(cli.contains("pair-code"))
+        XCTAssertTrue(agent.contains("remotePair"))
+        XCTAssertTrue(agent.contains("remoteHook"))
+        XCTAssertTrue(agent.contains("Hooks must fail open"))
+    }
+
     func testITermSelectionIntegrationUsesSelectionReferenceAndIsolatedClaudeRun() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -248,10 +417,13 @@ final class NoturcodeCoreTests: XCTestCase {
 
         let ownedFiles: [(String, String)] = [
             (".config/opencode/plugins/noturcode.js", "Generated by Noturcode\nnoturcode-bridge"),
+            (".config/noturcode/shell.zsh", "Generated by Noturcode\ncommand /usr/bin/nc"),
             (".claude/skills/nc/SKILL.md", "name: nc\nNoturcode macOS notch tracker"),
             (".claude/skills/noturcode-summary/SKILL.md", "name: noturcode-summary\n# Noturcode summary"),
             (".codex/skills/noturcode-summary/SKILL.md", "name: noturcode-summary\n# Noturcode summary"),
-            ("Library/Application Support/iTerm2/Scripts/AutoLaunch/Ask Noturcode.py", "ro.noturcode.ask-selection\nnoturcode-bridge")
+            ("Library/Application Support/iTerm2/Scripts/AutoLaunch/Ask Noturcode.py", "ro.noturcode.ask-selection\nnoturcode-bridge"),
+            ("Library/Application Support/Noturcode/bin/noturcode-cli", "Noturcode remote\nStreamLocalBindUnlink=yes"),
+            ("Library/Application Support/Noturcode/remote/noturcode-agent.py", "Zero-dependency Noturcode helper\nHooks must fail open")
         ]
         for (relative, content) in ownedFiles {
             let url = home.appendingPathComponent(relative)
@@ -264,6 +436,8 @@ final class NoturcodeCoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: bridge.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("bridge".utf8).write(to: bridge)
         try Data("[]".utf8).write(to: retainedState)
+        let zshrc = home.appendingPathComponent(".zshrc")
+        try Data("keep-this\n# Noturcode interactive CLI\n[[ -r \"$HOME/.config/noturcode/shell.zsh\" ]] && source \"$HOME/.config/noturcode/shell.zsh\"\n".utf8).write(to: zshrc)
 
         func run(_ arguments: [String]) throws -> (Int32, String) {
             let process = Process()
@@ -298,6 +472,9 @@ final class NoturcodeCoreTests: XCTestCase {
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: bridge.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: retainedState.path))
+        let zshContents = try String(contentsOf: zshrc, encoding: .utf8)
+        XCTAssertTrue(zshContents.contains("keep-this"))
+        XCTAssertFalse(zshContents.contains("Noturcode interactive CLI"))
         XCTAssertTrue(removal.1.contains("without stopping any terminal or harness session"))
 
         let dataRemoval = try run(["--delete-data"])
@@ -375,6 +552,87 @@ final class NoturcodeCoreTests: XCTestCase {
         )
 
         XCTAssertEqual(session.activeSubagents.map(\.id), ["current"])
+    }
+
+    @MainActor
+    func testSessionStoreBoundsFinishedSubagentsAndKeepsEveryActiveAgent() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-bounded-agents-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let store = SessionStore(persistence: SessionPersistence(fileURL: stateURL))
+        let start = Date(timeIntervalSince1970: 100)
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: .claude,
+            sessionID: "agents",
+            timestamp: start,
+            name: "agents",
+            terminalSessionID: "w0t1:AGENTS"
+        ))
+
+        for index in 0..<50 {
+            _ = store.apply(BridgeEvent(
+                kind: .subagentCompleted,
+                source: .claude,
+                sessionID: "agents",
+                timestamp: start.addingTimeInterval(Double(index + 1)),
+                subagentID: "done-\(index)",
+                subagentType: "worker"
+            ))
+        }
+        for index in 0..<4 {
+            _ = store.apply(BridgeEvent(
+                kind: .subagentStarted,
+                source: .claude,
+                sessionID: "agents",
+                timestamp: start.addingTimeInterval(Double(100 + index)),
+                subagentID: "active-\(index)",
+                subagentType: "worker"
+            ))
+        }
+
+        let session = try XCTUnwrap(store.sessions.first)
+        XCTAssertEqual(session.activeSubagents.count, 4)
+        XCTAssertEqual(session.subagents.filter { $0.state == .done }.count, 32)
+        XCTAssertEqual(session.subagents.count, 36)
+        XCTAssertFalse(session.subagents.contains { $0.id == "done-0" })
+        XCTAssertTrue(session.subagents.contains { $0.id == "done-49" })
+    }
+
+    @MainActor
+    func testSessionStoreDropsAnIdenticalReconnectEvent() throws {
+        let stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-noop-event-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: stateURL) }
+        let store = SessionStore(persistence: SessionPersistence(fileURL: stateURL))
+        let initial = BridgeEvent(
+            kind: .connect,
+            source: .claude,
+            sessionID: "same",
+            timestamp: Date(timeIntervalSince1970: 100),
+            name: "same",
+            terminalSessionID: "w0t1:SAME",
+            sourceProcessID: 42,
+            cwd: "/tmp/same"
+        )
+        XCTAssertNotNil(store.apply(initial))
+        store.flushPersistenceForTesting()
+
+        var transitionCount = 0
+        store.transitionHandler = { _ in transitionCount += 1 }
+        let duplicate = BridgeEvent(
+            kind: .connect,
+            source: .claude,
+            sessionID: "same",
+            timestamp: Date(timeIntervalSince1970: 200),
+            name: "same",
+            terminalSessionID: "w0t1:SAME",
+            sourceProcessID: 42,
+            cwd: "/tmp/same"
+        )
+
+        XCTAssertNil(store.apply(duplicate))
+        XCTAssertEqual(transitionCount, 0)
     }
 
     func testDurationAndTokenFormatting() {
@@ -2117,7 +2375,8 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(refreshTail[..<refreshEnd.lowerBound].contains("hostingView.rootView ="))
         XCTAssertTrue(store.contains("class SessionPersistenceDebouncer: @unchecked Sendable"))
         XCTAssertTrue(store.contains("queue.asyncAfter(deadline: .now() + .milliseconds(180)"))
-        XCTAssertTrue(store.contains("case .activityStarted, .activityFinished, .subagentStarted, .subagentActivity"))
+        XCTAssertTrue(store.contains("case .activityStarted, .activityFinished, .subagentStarted, .subagentActivity,"))
+        XCTAssertTrue(store.contains(".subagentCompleted, .subagentFailed"))
         XCTAssertTrue(reader.contains("private var nextDiscoveryAt: [SessionKey: Date]"))
         XCTAssertTrue(reader.contains("now.addingTimeInterval(3)"))
         XCTAssertFalse(display.contains("Task.sleep(for: .milliseconds(230))"))

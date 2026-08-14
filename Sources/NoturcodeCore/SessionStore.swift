@@ -35,6 +35,8 @@ private final class SessionPersistenceDebouncer: @unchecked Sendable {
 
 @MainActor
 public final class SessionStore: ObservableObject {
+    private static let maximumFinishedSubagents = 32
+
     @Published public private(set) var sessions: [TrackedSession]
     @Published public private(set) var lastStaleTargetMessage: String?
 
@@ -45,7 +47,9 @@ public final class SessionStore: ObservableObject {
     public init(persistence: SessionPersistence = SessionPersistence()) {
         self.persistence = persistence
         self.persistenceDebouncer = SessionPersistenceDebouncer(persistence: persistence)
-        self.sessions = persistence.load().sorted { $0.lastPromptAt > $1.lastPromptAt }
+        self.sessions = persistence.load()
+            .map(Self.pruningSubagents)
+            .sorted { $0.lastPromptAt > $1.lastPromptAt }
     }
 
     @discardableResult
@@ -211,18 +215,22 @@ public final class SessionStore: ObservableObject {
             }
             session.subagents.removeAll { $0.id == subagentID }
             session.subagents.append(subagent)
-            session.subagents.sort { $0.startedAt < $1.startedAt }
+            session.subagents = Self.boundedSubagents(session.subagents)
             upsert(session)
         }
 
         if let sessionTokens = event.sessionTokens,
            let tokenIndex = sessions.firstIndex(where: { $0.key == key }) {
-            sessions[tokenIndex].tokens = max(sessions[tokenIndex].tokens ?? 0, sessionTokens)
+            let nextTokens = max(sessions[tokenIndex].tokens ?? 0, sessionTokens)
+            if sessions[tokenIndex].tokens != nextTokens {
+                sessions[tokenIndex].tokens = nextTokens
+            }
         }
 
         sortSessions()
-        persist(sessions, eventKind: event.kind)
         let current = sessions.first(where: { $0.key == key })
+        guard old != current else { return nil }
+        persist(sessions, eventKind: event.kind)
         let transition = SessionTransition(old: old, new: current, event: event)
         transitionHandler?(transition)
         return transition
@@ -284,7 +292,9 @@ public final class SessionStore: ObservableObject {
 
     private func upsert(_ session: TrackedSession) {
         if let index = sessions.firstIndex(where: { $0.key == session.key }) {
-            sessions[index] = session
+            if sessions[index] != session {
+                sessions[index] = session
+            }
         } else {
             sessions.append(session)
         }
@@ -298,12 +308,16 @@ public final class SessionStore: ObservableObject {
     }
 
     private func sortSessions() {
-        sessions.sort { $0.lastPromptAt > $1.lastPromptAt }
+        let sorted = sessions.sorted { $0.lastPromptAt > $1.lastPromptAt }
+        if sorted != sessions {
+            sessions = sorted
+        }
     }
 
     private func persist(_ snapshot: [TrackedSession], eventKind: BridgeEventKind) {
         switch eventKind {
-        case .activityStarted, .activityFinished, .subagentStarted, .subagentActivity:
+        case .activityStarted, .activityFinished, .subagentStarted, .subagentActivity,
+             .subagentCompleted, .subagentFailed:
             persistenceDebouncer.schedule(snapshot)
         default:
             persistenceDebouncer.saveNow(snapshot)
@@ -333,5 +347,20 @@ public final class SessionStore: ObservableObject {
             recent[index].finishedAt = timestamp
         }
         session.recentActivities = recent
+    }
+
+    private static func pruningSubagents(in session: TrackedSession) -> TrackedSession {
+        var session = session
+        session.subagents = boundedSubagents(session.subagents)
+        return session
+    }
+
+    private static func boundedSubagents(_ subagents: [SubagentSnapshot]) -> [SubagentSnapshot] {
+        let active = subagents.filter { $0.state == .working || $0.state == .askingYou }
+        let finished = subagents
+            .filter { $0.state != .working && $0.state != .askingYou }
+            .sorted { $0.updatedAt < $1.updatedAt }
+            .suffix(maximumFinishedSubagents)
+        return (Array(finished) + active).sorted { $0.startedAt < $1.startedAt }
     }
 }

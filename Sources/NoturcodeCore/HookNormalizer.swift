@@ -75,6 +75,7 @@ public enum HookNormalizer {
         source: AgentSource,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         sourceProcessID: Int32? = nil,
+        terminalSessionIDOverride: String? = nil,
         now: Date = Date()
     ) throws -> HookNormalizationResult {
         let payload = try JSONDecoder().decode(JSONValue.self, from: data)
@@ -83,6 +84,7 @@ public enum HookNormalizer {
             source: source,
             environment: environment,
             sourceProcessID: sourceProcessID,
+            terminalSessionIDOverride: terminalSessionIDOverride,
             now: now
         )
     }
@@ -92,6 +94,7 @@ public enum HookNormalizer {
         source: AgentSource,
         environment: [String: String],
         sourceProcessID: Int32?,
+        terminalSessionIDOverride: String? = nil,
         now: Date
     ) -> HookNormalizationResult {
         let eventName = payload.firstString(for: ["hook_event_name", "hookEventName", "type"]) ?? ""
@@ -99,7 +102,8 @@ public enum HookNormalizer {
             ?? environment["CODEX_THREAD_ID"]
             ?? environment["CLAUDE_SESSION_ID"]
             ?? "unknown-\(sourceProcessID ?? 0)"
-        let terminalSessionID = terminalIdentity(environment: environment, sourceProcessID: sourceProcessID)
+        let terminalSessionID = terminalSessionIDOverride
+            ?? terminalIdentity(environment: environment, sourceProcessID: sourceProcessID)
         let cwd = payload.firstString(for: ["cwd"]) ?? environment["PWD"]
         let transcriptPath = payload.firstString(for: ["transcript_path", "transcriptPath", "rollout_path", "rolloutPath"])
         let tokens = payload.recursivelySummedTokens()

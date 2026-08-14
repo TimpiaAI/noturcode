@@ -14,6 +14,8 @@ The integration installer merges only Noturcode-owned handlers, preserves unrela
 
 The native process keeps disposable session state in a JSON file. It does not proxy model traffic and does not maintain a cloud service.
 
+For a paired VPS, `nc ssh` opens an ordinary interactive SSH shell with a per-shell Unix-socket reverse forward. The remote Python helper sends authenticated hook payloads through that socket. The Mac normalizes the payload with the same `HookNormalizer` used by local integrations. No TCP listener or public service is created.
+
 ## 3. Native macOS UI
 
 The SwiftUI/AppKit application renders one display-aware status surface per screen and one cursor-relative completion panel. It reads source-owned transcripts directly and incrementally, reconstructing conversation entries without embedding a live terminal.
@@ -38,6 +40,11 @@ hook/plugin -> noturcode-bridge -> Unix socket -> SessionStore
                                                   |
                                                   v
                                       exact iTerm2 session UUID
+
+remote hook -> noturcode-agent -> SSH Unix socket -> RemoteBridgeProcessor
+                                                    |
+                                                    v
+                                               SessionStore
 ```
 
 ## Design invariants
@@ -45,6 +52,7 @@ hook/plugin -> noturcode-bridge -> Unix socket -> SessionStore
 - Never replace or close the user's terminal.
 - Never guess success when a target cannot be resolved.
 - Never overwrite unrelated hook configuration.
-- Never require network access for status, transcripts, or navigation.
+- Never require network access for local status, transcripts, or navigation.
+- Carry remote events only through an explicit paired SSH tunnel.
 - Never expose state or IPC to other local users.
 - Never describe detected compatibility as verified feature parity.

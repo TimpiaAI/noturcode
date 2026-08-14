@@ -49,6 +49,17 @@ final class AppModel: ObservableObject {
         let lastPromptAt: Date
     }
 
+    private struct TranscriptFingerprint: Equatable, Sendable {
+        let revision: TranscriptFileRevision
+        let lastPromptAt: Date
+    }
+
+    private struct TranscriptObservation: Sendable {
+        let candidate: TranscriptCandidate
+        let fingerprint: TranscriptFingerprint
+        let completed: Bool
+    }
+
     static let shared = AppModel()
 
     let store: SessionStore
@@ -73,6 +84,7 @@ final class AppModel: ObservableObject {
     let filePreviews = FilePreviewWindowCoordinator()
     let completionReads = CompletionReadStore()
     let selectionQuestions = SelectionQuestionCoordinator()
+    nonisolated let remoteBridge = RemoteBridgeProcessor()
 
     private var socketServer: UnixSocketServer?
     private var processMonitor: SessionProcessMonitor?
@@ -80,6 +92,7 @@ final class AppModel: ObservableObject {
     private var askingEscalations: [SessionKey: Task<Void, Never>] = [:]
     private var staleMessageTask: Task<Void, Never>?
     private var transcriptReconciliationTask: Task<Void, Never>?
+    private var transcriptFingerprints: [SessionKey: TranscriptFingerprint] = [:]
     private var cancellables: Set<AnyCancellable> = []
 
     private init() {
@@ -132,6 +145,25 @@ final class AppModel: ObservableObject {
                 }
                 return Data("{\"ok\":true}".utf8)
             }
+            if let request = try? JSONDecoder().decode(RemotePairRequest.self, from: data),
+               request.type == "remotePair" {
+                let response = self?.remoteBridge.pair(request)
+                    ?? RemotePairResponse(ok: false, error: "Noturcode is stopping.")
+                return Self.encodeRemoteResponse(response)
+            }
+            if let request = try? JSONDecoder().decode(RemoteHookRequest.self, from: data),
+               request.type == "remoteHook" {
+                guard let result = self?.remoteBridge.process(request) else {
+                    return Self.encodeRemoteResponse(RemoteHookResponse(ok: false, error: "Noturcode is stopping."))
+                }
+                let remoteEvents = result.events
+                Task { @MainActor [weak self] in
+                    for event in remoteEvents {
+                        self?.receive(event)
+                    }
+                }
+                return Self.encodeRemoteResponse(result.response)
+            }
             guard let envelope = try? JSONDecoder().decode(BridgeEnvelope.self, from: data),
                   envelope.version == BridgeEnvelope.currentVersion else {
                 return Data("{\"ok\":false}".utf8)
@@ -162,12 +194,17 @@ final class AppModel: ObservableObject {
         }
     }
 
+    nonisolated private static func encodeRemoteResponse<T: Encodable>(_ response: T) -> Data {
+        (try? JSONEncoder().encode(response)) ?? Data("{\"ok\":false}".utf8)
+    }
+
     func stop() {
         askingEscalations.values.forEach { $0.cancel() }
         askingEscalations.removeAll()
         staleMessageTask?.cancel()
         transcriptReconciliationTask?.cancel()
         transcriptReconciliationTask = nil
+        transcriptFingerprints.removeAll()
         displayCoordinator?.stop()
         displayCoordinator = nil
         processMonitor?.stop()
@@ -376,6 +413,7 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 let candidates = self.store.sessions.compactMap { session -> TranscriptCandidate? in
                     guard session.state == .working,
+                          session.key.source == .claude,
                           let path = session.transcriptPath else { return nil }
                     return TranscriptCandidate(
                         key: session.key,
@@ -384,16 +422,34 @@ final class AppModel: ObservableObject {
                         lastPromptAt: session.lastPromptAt
                     )
                 }
-                let completedCandidates = await Task.detached(priority: .utility) {
-                    candidates.filter { candidate in
-                        TranscriptRunStateDetector.turnCompleted(
-                            atPath: candidate.path,
-                            source: candidate.source,
-                            after: candidate.lastPromptAt
+                let activeKeys = Set(candidates.map(\.key))
+                self.transcriptFingerprints = self.transcriptFingerprints.filter { activeKeys.contains($0.key) }
+                let previousFingerprints = self.transcriptFingerprints
+                let observations = await Task.detached(priority: .utility) {
+                    candidates.compactMap { candidate -> TranscriptObservation? in
+                        guard let revision = TranscriptRunStateDetector.revision(atPath: candidate.path) else {
+                            return nil
+                        }
+                        let fingerprint = TranscriptFingerprint(
+                            revision: revision,
+                            lastPromptAt: candidate.lastPromptAt
+                        )
+                        guard previousFingerprints[candidate.key] != fingerprint else { return nil }
+                        return TranscriptObservation(
+                            candidate: candidate,
+                            fingerprint: fingerprint,
+                            completed: TranscriptRunStateDetector.turnCompleted(
+                                atPath: candidate.path,
+                                source: candidate.source,
+                                after: candidate.lastPromptAt
+                            )
                         )
                     }
                 }.value
-                for candidate in completedCandidates {
+                for observation in observations {
+                    let candidate = observation.candidate
+                    self.transcriptFingerprints[candidate.key] = observation.fingerprint
+                    guard observation.completed else { continue }
                     guard let current = self.store.sessions.first(where: { $0.key == candidate.key }),
                           current.state == .working,
                           current.lastPromptAt == candidate.lastPromptAt else { continue }

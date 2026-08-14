@@ -25,6 +25,12 @@ struct NoturcodeBridgeMain {
             runEmit(arguments: Array(arguments.dropFirst()))
         case "doctor":
             runDoctor()
+        case "pair-code":
+            runPairCode(arguments: Array(arguments.dropFirst()))
+        case "terminal-id":
+            runTerminalID()
+        case "socket-path":
+            writeStandardOutput(NoturcodeSocket.path + "\n")
         case "ask-selection":
             runAskSelection(arguments: Array(arguments.dropFirst()))
         default:
@@ -212,6 +218,25 @@ struct NoturcodeBridgeMain {
         let terminal = identity?.application.displayName ?? "generic"
         let multiplexer = identity?.multiplexer.map { " (\($0.rawValue))" } ?? ""
         writeStandardOutput("terminal: \(terminal)\(multiplexer)\n")
+    }
+
+    private static func runPairCode(arguments: [String]) {
+        let host = option("--host", in: arguments) ?? "remote VPS"
+        do {
+            let pairing = try RemotePairingStore().createCode(hostHint: host)
+            writeStandardOutput(pairing.code + "\n")
+        } catch {
+            writeStandardError("Could not create a pairing code: \(error.localizedDescription)\n")
+            Foundation.exit(1)
+        }
+    }
+
+    private static func runTerminalID() {
+        guard let identity = terminalIdentity(), !identity.isEmpty else {
+            writeStandardError("Noturcode could not identify this terminal.\n")
+            Foundation.exit(1)
+        }
+        writeStandardOutput(identity + "\n")
     }
 
     private static func runAskSelection(arguments: [String]) {
