@@ -35,6 +35,8 @@ struct NoturcodeBridgeMain {
             runAskSelection(arguments: Array(arguments.dropFirst()))
         case "paste-image":
             runPasteImage(arguments: Array(arguments.dropFirst()))
+        case "remote-terminal":
+            runRemoteTerminal(arguments: Array(arguments.dropFirst()))
         default:
             writeStandardError("Unknown command: \(command)\n")
             Foundation.exit(64)
@@ -234,7 +236,10 @@ struct NoturcodeBridgeMain {
     }
 
     private static func runTerminalID(arguments: [String]) {
-        guard let identity = terminalIdentity(remoteHost: option("--remote-host", in: arguments)), !identity.isEmpty else {
+        guard let identity = terminalIdentity(
+            remoteHost: option("--remote-host", in: arguments),
+            sshControlPath: option("--ssh-control-path", in: arguments)
+        ), !identity.isEmpty else {
             writeStandardError("Noturcode could not identify this terminal.\n")
             Foundation.exit(1)
         }
@@ -252,6 +257,31 @@ struct NoturcodeBridgeMain {
             writeStandardOutput("ok\n")
         } catch {
             writeStandardError("\(error.localizedDescription)\n")
+            Foundation.exit(1)
+        }
+    }
+
+    private static func runRemoteTerminal(arguments: [String]) {
+        guard let action = arguments.first,
+              let terminalSessionID = option("--terminal-id", in: arguments),
+              !terminalSessionID.isEmpty else {
+            writeStandardError("remote-terminal requires register or unregister and --terminal-id\n")
+            Foundation.exit(64)
+        }
+        do {
+            let registry = RemoteTerminalRegistry()
+            switch action {
+            case "register":
+                try registry.register(terminalSessionID: terminalSessionID)
+            case "unregister":
+                try registry.unregister(terminalSessionID: terminalSessionID)
+            default:
+                writeStandardError("remote-terminal requires register or unregister\n")
+                Foundation.exit(64)
+            }
+            writeStandardOutput("ok\n")
+        } catch {
+            writeStandardError("Could not \(action) the remote terminal: \(error.localizedDescription)\n")
             Foundation.exit(1)
         }
     }
@@ -343,10 +373,16 @@ struct NoturcodeBridgeMain {
         try? process.run()
     }
 
-    private static func terminalIdentity(remoteHost: String? = nil) -> String? {
+    private static func terminalIdentity(
+        remoteHost: String? = nil,
+        sshControlPath: String? = nil
+    ) -> String? {
         var environment = ProcessInfo.processInfo.environment
         if let remoteHost, !remoteHost.isEmpty {
             environment["NOTURCODE_REMOTE_HOST"] = remoteHost
+        }
+        if let sshControlPath, !sshControlPath.isEmpty {
+            environment["NOTURCODE_SSH_CONTROL_PATH"] = sshControlPath
         }
         let parentPID = getppid()
         if environment["TTY"]?.isEmpty != false,

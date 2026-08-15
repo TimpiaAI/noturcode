@@ -118,33 +118,56 @@ pair_host() {
   [[ -r "$remote_agent" ]] || fail "The remote helper is missing. Repair Noturcode integrations." || return 1
   ensure_app || return 1
 
-  local local_socket code remote_socket
-  local_socket=$("$bridge" socket-path) || return 1
-  code=$("$bridge" pair-code --host "$host") || return 1
-  remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-pair-$$.sock"
-  start_proxy "$local_socket" pair || return 1
-
   step 1 "Copy the free helper to $host"
   if ! sync_remote_agent "$host"; then
-    stop_proxy
     fail "Could not copy the helper to $host."
     return 1
   fi
   settle "Helper copied"
 
+  local local_socket="" code="" remote_socket="" active_pair_ssh_pid=""
+  local cleanup_done=0
+  cleanup_pair() {
+    (( cleanup_done )) && return
+    cleanup_done=1
+    if [[ -n "$active_pair_ssh_pid" ]]; then
+      kill "$active_pair_ssh_pid" 2>/dev/null || true
+      wait "$active_pair_ssh_pid" 2>/dev/null || true
+      active_pair_ssh_pid=""
+    fi
+    stop_proxy
+  }
+  trap 'cleanup_pair; exit 129' HUP
+  trap 'cleanup_pair; exit 130' INT
+  trap 'cleanup_pair; exit 143' TERM
+  trap cleanup_pair EXIT
+
+  local_socket=$("$bridge" socket-path) || { cleanup_pair; trap - HUP INT TERM EXIT; return 1; }
+  code=$("$bridge" pair-code --host "$host") || { cleanup_pair; trap - HUP INT TERM EXIT; return 1; }
+  remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-pair-$$.sock"
+  start_proxy "$local_socket" pair || { cleanup_pair; trap - HUP INT TERM EXIT; return 1; }
+
   step 2 "Pair with one-time code $code"
-  if ! ssh -tt \
+  ssh -tt \
       -o ExitOnForwardFailure=yes \
       -o StreamLocalBindUnlink=yes \
       -R "${remote_socket}:${active_proxy_socket}" \
       "$host" \
-      "NOTURCODE_REMOTE_SOCKET='$remote_socket' \"\$HOME/.local/bin/noturcode-agent\" pair '$code' && \"\$HOME/.local/bin/noturcode-agent\" install"; then
-    stop_proxy
+      "NOTURCODE_REMOTE_SOCKET='$remote_socket' \"\$HOME/.local/bin/noturcode-agent\" pair '$code' && \"\$HOME/.local/bin/noturcode-agent\" install" \
+      </dev/tty >/dev/tty 2>/dev/tty &
+  active_pair_ssh_pid=$!
+  wait "$active_pair_ssh_pid"
+  local pair_ssh_exit_code=$?
+  active_pair_ssh_pid=""
+  if (( pair_ssh_exit_code != 0 )); then
     fail "Pairing failed. Run nc and try again."
+    cleanup_pair
+    trap - HUP INT TERM EXIT
     return 1
   fi
-  stop_proxy
   settle "VPS paired"
+  cleanup_pair
+  trap - HUP INT TERM EXIT
 
   step 3 "Ready. Run nc, then choose Open an SSH workspace."
 }
@@ -169,16 +192,60 @@ connect_host() {
   fi
   settle "Helper ready"
 
-  local local_socket terminal_id remote_socket remote_command
-  local_socket=$("$bridge" socket-path) || return 1
-  terminal_id=$("$bridge" terminal-id --remote-host "$host") || return 1
+  local local_socket="" terminal_id="" remote_socket="" remote_command="" active_ssh_pid=""
+  local control_socket="" control_dir=""
+  local cleanup_done=0
+  cleanup_workspace() {
+    (( cleanup_done )) && return
+    cleanup_done=1
+    if [[ -n "$active_ssh_pid" ]]; then
+      kill "$active_ssh_pid" 2>/dev/null || true
+      wait "$active_ssh_pid" 2>/dev/null || true
+      active_ssh_pid=""
+    fi
+    stop_proxy
+    if [[ -n "$terminal_id" ]]; then
+      "$bridge" remote-terminal unregister --terminal-id "$terminal_id" >/dev/null 2>&1 || true
+    fi
+    [[ -z "$control_socket" ]] || rm -f -- "$control_socket"
+    [[ -z "$control_dir" ]] || rmdir -- "$control_dir" 2>/dev/null || true
+  }
+  trap 'cleanup_workspace; exit 129' HUP
+  trap 'cleanup_workspace; exit 130' INT
+  trap 'cleanup_workspace; exit 143' TERM
+  trap cleanup_workspace EXIT
+
+  local_socket=$("$bridge" socket-path) || { cleanup_workspace; trap - HUP INT TERM EXIT; return 1; }
+  control_dir=$(mktemp -d /tmp/noturcode-ssh.XXXXXX) || {
+    fail "Could not create the private SSH control folder."
+    cleanup_workspace
+    trap - HUP INT TERM EXIT
+    return 1
+  }
+  chmod 700 "$control_dir"
+  control_socket="$control_dir/control"
+  terminal_id=$("$bridge" terminal-id --remote-host "$host" --ssh-control-path "$control_socket") || {
+    cleanup_workspace
+    trap - HUP INT TERM EXIT
+    return 1
+  }
+  if ! "$bridge" remote-terminal register --terminal-id "$terminal_id" >/dev/null; then
+    fail "Could not register this SSH workspace for image paste."
+    cleanup_workspace
+    trap - HUP INT TERM EXIT
+    return 1
+  fi
   remote_socket="/tmp/noturcode-${USER//[^A-Za-z0-9_-]/_}-$$.sock"
   if [[ "$mode" == "resume" ]]; then
     remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; \"\$HOME/.local/bin/noturcode-agent\" resume; resume_exit=\$?; if [ \$resume_exit -ne 0 ]; then print '\nNoturcode kept this VPS shell open. Run nc resume again after the active chat closes.' 2>/dev/null || echo '\nNoturcode kept this VPS shell open. Run nc resume again after the active chat closes.'; exec \"\${SHELL:-/bin/sh}\" -l; fi"
   else
     remote_command="export NOTURCODE_REMOTE_SOCKET='$remote_socket'; export NOTURCODE_TERMINAL_SESSION_ID='$terminal_id'; export NOTURCODE_REMOTE_HOST='$host'; export NOTURCODE_SESSION_NAME='$chat_name'; exec \"\${SHELL:-/bin/sh}\" -l"
   fi
-  start_proxy "$local_socket" session || return 1
+  if ! start_proxy "$local_socket" session; then
+    cleanup_workspace
+    trap - HUP INT TERM EXIT
+    return 1
+  fi
 
   step 2 "Open the encrypted tunnel"
   settle "Tunnel ready"
@@ -189,13 +256,20 @@ connect_host() {
     step 3 "Start the interactive shell on $host"
     step 4 "Run your coding agent. Noturcode will show it as $chat_name."
   fi
+
   ssh -tt \
+    -M -S "$control_socket" \
     -o ExitOnForwardFailure=yes \
-    -o StreamLocalBindUnlink=yes \
-    -R "${remote_socket}:${active_proxy_socket}" \
-    "$host" "$remote_command"
+      -o StreamLocalBindUnlink=yes \
+      -R "${remote_socket}:${active_proxy_socket}" \
+      "$host" "$remote_command" \
+      </dev/tty >/dev/tty 2>/dev/tty &
+  active_ssh_pid=$!
+  wait "$active_ssh_pid"
   local ssh_exit_code=$?
-  stop_proxy
+  active_ssh_pid=""
+  cleanup_workspace
+  trap - HUP INT TERM EXIT
   return "$ssh_exit_code"
 }
 

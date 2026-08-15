@@ -255,6 +255,7 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
     public var sshTTY: String?
     public var sshConnection: String?
     public var remoteHost: String?
+    public var sshControlPath: String?
 
     public init(
         application: TerminalApplicationKind,
@@ -275,7 +276,8 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
         zellijPaneID: String? = nil,
         sshTTY: String? = nil,
         sshConnection: String? = nil,
-        remoteHost: String? = nil
+        remoteHost: String? = nil,
+        sshControlPath: String? = nil
     ) {
         self.application = application
         self.multiplexer = multiplexer
@@ -296,6 +298,7 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
         self.sshTTY = sshTTY
         self.sshConnection = sshConnection
         self.remoteHost = remoteHost
+        self.sshControlPath = sshControlPath
     }
 
     public var exactIdentifier: String? {
@@ -329,7 +332,8 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
            bundleIdentifier == nil,
            sshTTY == nil,
            sshConnection == nil,
-           remoteHost == nil {
+           remoteHost == nil,
+           sshControlPath == nil {
             return nativeSessionID
         }
 
@@ -400,6 +404,9 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
         if let remoteHost, !remoteHost.isEmpty {
             query.append(("remoteHost", remoteHost))
         }
+        if let sshControlPath, !sshControlPath.isEmpty {
+            query.append(("sshControl", sshControlPath))
+        }
 
         let suffix = query.isEmpty
             ? ""
@@ -434,6 +441,7 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
         let sshTTY = value("SSH_TTY")
         let sshConnection = value("SSH_CONNECTION")
         let remoteHost = value("NOTURCODE_REMOTE_HOST")
+        let sshControlPath = value("NOTURCODE_SSH_CONTROL_PATH")
         let multiplexer: TerminalMultiplexerKind?
         if tmux != nil || tmuxPane != nil {
             multiplexer = .tmux
@@ -475,7 +483,8 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
             zellijPaneID: zellijPaneID,
             sshTTY: sshTTY,
             sshConnection: sshConnection,
-            remoteHost: remoteHost
+            remoteHost: remoteHost,
+            sshControlPath: sshControlPath
         )
     }
 
@@ -553,7 +562,8 @@ public struct TerminalIdentity: Codable, Equatable, Sendable {
             zellijPaneID: zellijPaneID,
             sshTTY: values["sshTTY"],
             sshConnection: values["sshConnection"],
-            remoteHost: values["remoteHost"]
+            remoteHost: values["remoteHost"],
+            sshControlPath: values["sshControl"]
         )
     }
 

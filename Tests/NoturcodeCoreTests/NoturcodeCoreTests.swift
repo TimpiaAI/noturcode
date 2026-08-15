@@ -9,12 +9,14 @@ final class NoturcodeCoreTests: XCTestCase {
         let identity = TerminalIdentity(
             application: .iterm,
             nativeSessionID: "w0t0p3:ABC-123",
-            remoteHost: "gprc"
+            remoteHost: "gprc",
+            sshControlPath: "/tmp/noturcode-ssh.ABC123/control"
         )
 
         let parsed = try XCTUnwrap(TerminalIdentity.parse(sessionID: identity.sessionID))
         XCTAssertEqual(parsed.nativeSessionID, "w0t0p3:ABC-123")
         XCTAssertEqual(parsed.remoteHost, "gprc")
+        XCTAssertEqual(parsed.sshControlPath, "/tmp/noturcode-ssh.ABC123/control")
     }
 
     func testRemoteImagePasteUsesObservedCommandVWithoutBlockingTextPaste() throws {
@@ -27,9 +29,14 @@ final class NoturcodeCoreTests: XCTestCase {
         let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
         let model = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
         let uploader = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RemoteImagePasteCoordinator.swift"))
+        let uploadPlan = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeCore/RemoteImageUploadPlan.swift"))
+        let processRunner = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeCore/BoundedProcessRunner.swift"))
         let installer = try String(contentsOf: repository.appendingPathComponent("scripts/install.sh"))
+        let remoteDocs = try String(contentsOf: repository.appendingPathComponent("docs/REMOTE.md"))
 
         XCTAssertTrue(provider.contains("KeystrokeMonitor"))
+        XCTAssertTrue(provider.contains("REMOTE_TERMINALS"))
+        XCTAssertTrue(provider.contains("os.listdir(REMOTE_TERMINALS)"))
         XCTAssertTrue(provider.contains("Keycode.ANSI_V"))
         XCTAssertTrue(provider.contains("Modifier.COMMAND"))
         XCTAssertTrue(provider.contains("paste-image"))
@@ -38,10 +45,19 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(provider.contains("KeystrokeMonitor(connection, session_id)"))
         XCTAssertTrue(provider.contains("KeystrokeFilter(connection, patterns, session_id)"))
         XCTAssertTrue(provider.contains("Modifier.CONTROL"))
-        XCTAssertTrue(provider.contains("connected-sessions.json"))
-        XCTAssertTrue(provider.contains("urllib.parse"))
+        XCTAssertFalse(provider.contains("connected-sessions.json"))
         XCTAssertFalse(provider.contains("BRIDGE, \"paste-image-sessions\""))
         XCTAssertTrue(cli.contains("terminal-id --remote-host \"$host\""))
+        XCTAssertTrue(cli.contains("--ssh-control-path \"$control_socket\""))
+        XCTAssertTrue(cli.contains("-M -S \"$control_socket\""))
+        XCTAssertTrue(cli.contains("mktemp -d /tmp/noturcode-ssh.XXXXXX"))
+        XCTAssertTrue(cli.contains("chmod 700 \"$control_dir\""))
+        XCTAssertTrue(cli.contains("remote-terminal register --terminal-id \"$terminal_id\""))
+        XCTAssertTrue(cli.contains("remote-terminal unregister --terminal-id \"$terminal_id\""))
+        XCTAssertTrue(cli.contains("trap 'cleanup_workspace; exit 129' HUP"))
+        XCTAssertTrue(cli.contains("trap 'cleanup_workspace; exit 143' TERM"))
+        XCTAssertTrue(cli.contains("trap cleanup_workspace EXIT"))
+        XCTAssertTrue(cli.contains("trap 'cleanup_pair; exit 129' HUP"))
         XCTAssertTrue(bridge.contains("case \"paste-image\""))
         XCTAssertTrue(model.contains("TerminalImagePasteRequest"))
         XCTAssertTrue(model.contains("remoteImagePaste.handle"))
@@ -50,11 +66,16 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(uploader.contains("TerminalTarget(sessionID: request.terminalSessionID)"))
         XCTAssertFalse(uploader.contains("/usr/bin/scp"))
         XCTAssertEqual(uploader.components(separatedBy: "executable: \"/usr/bin/ssh\"").count - 1, 1)
-        XCTAssertTrue(uploader.contains("FileHandle(forReadingFrom:"))
-        XCTAssertTrue(uploader.contains("cat >"))
+        XCTAssertTrue(uploader.contains("BoundedProcessRunner.run"))
+        XCTAssertTrue(processRunner.contains("readDataToEndOfFile"))
+        XCTAssertTrue(processRunner.contains("case timedOut"))
+        XCTAssertTrue(uploadPlan.contains("cat >"))
         XCTAssertTrue(uploader.contains("insertWithoutSubmitting"))
+        XCTAssertTrue(uploader.contains("RemoteTerminalRegistry().targets()"))
         XCTAssertTrue(installer.contains("Reload only the small Noturcode provider"))
         XCTAssertFalse(installer.contains("killall iTerm"))
+        XCTAssertTrue(remoteDocs.contains("Image upload reuses that authenticated connection"))
+        XCTAssertFalse(remoteDocs.contains("must accept a\nnon-interactive key-based SSH connection"))
     }
 
     func testITermImagePathInsertDoesNotPressEnter() throws {
@@ -408,7 +429,9 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(cli.contains("Chat name"))
         XCTAssertTrue(agent.contains("codex\", \"resume\", \"--all"))
         XCTAssertTrue(cli.contains("noturcode-agent\\\" resume"))
-        XCTAssertTrue(cli.contains("ssh_exit_code"))
+        XCTAssertTrue(cli.contains("cleanup_workspace()"))
+        XCTAssertTrue(cli.contains("local ssh_exit_code=$?"))
+        XCTAssertTrue(cli.contains("return $?"))
         XCTAssertFalse(cli.contains("local status="))
         XCTAssertTrue(cli.contains("settle()"))
         XCTAssertTrue(cli.contains("[===>]"))

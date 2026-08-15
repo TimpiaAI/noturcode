@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 import asyncio
 import datetime
-import json
 import os
 import time
-import urllib.parse
+import uuid
 import iterm2
 
 BRIDGE = os.path.expanduser("~/Library/Application Support/Noturcode/bin/noturcode-bridge")
 LOG = os.path.expanduser("~/Library/Application Support/Noturcode/selection-provider.log")
-STATE = os.path.expanduser("~/Library/Application Support/Noturcode/connected-sessions.json")
+REMOTE_TERMINALS = os.path.expanduser("~/Library/Application Support/Noturcode/remote-terminals")
 
 def record(message):
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
@@ -114,27 +113,23 @@ async def main(connection):
     def remote_paste_sessions():
         nonlocal state_signature, cached_sessions
         try:
-            metadata = os.stat(STATE)
-            signature = (metadata.st_mtime_ns, metadata.st_size)
+            try:
+                registry_metadata = os.stat(REMOTE_TERMINALS)
+                registry_signature = (registry_metadata.st_mtime_ns, registry_metadata.st_size)
+            except FileNotFoundError:
+                registry_signature = None
+            signature = registry_signature
             if signature == state_signature:
                 return set(cached_sessions)
-            with open(STATE, "r", encoding="utf-8") as handle:
-                tracked_sessions = json.load(handle)
             found = set()
-            prefix = "terminal:iterm:session:"
-            for tracked in tracked_sessions:
-                encoded = (tracked.get("terminal") or {}).get("sessionID") or ""
-                if not encoded.startswith(prefix):
-                    continue
-                identity = encoded[len(prefix):]
-                native_encoded, _, query = identity.partition("?")
-                values = urllib.parse.parse_qs(query)
-                if not values.get("remoteHost", [""])[0]:
-                    continue
-                native_id = urllib.parse.unquote(native_encoded)
-                session_id = native_id.rsplit(":", 1)[-1]
-                if session_id:
-                    found.add(session_id)
+            if registry_signature is not None:
+                for name in os.listdir(REMOTE_TERMINALS):
+                    if name.endswith(".json"):
+                        session_id = name[:-5]
+                        try:
+                            found.add(str(uuid.UUID(session_id)).upper())
+                        except ValueError:
+                            pass
             state_signature = signature
             cached_sessions = found
             return set(found)

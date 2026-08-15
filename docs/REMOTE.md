@@ -43,15 +43,18 @@ Run `nc` again and choose `Open an SSH workspace`.
 
 The command opens a normal interactive SSH shell. It also creates a unique Unix-socket forward for that shell and exports the exact local terminal identity. Start Claude, Codex, or Gemini inside it. Use `/nc NAME` inside the coding agent as usual.
 
-### Paste a Mac image into remote Codex
+### Paste a Mac image into remote Codex or Claude Code
 
-Copy an image on the Mac. Focus the Codex input in the iTerm2 SSH workspace. Press `Command-V`.
+Copy an image on the Mac. Focus the agent input in the iTerm2 SSH workspace. Press `Command-V`.
 Noturcode writes a private PNG, copies it to `~/.cache/noturcode/attachments/` on the VPS, and
-pastes the remote path as a Codex image attachment. It does not press Enter. Write the prompt, then
+pastes the remote path as an image attachment. It does not press Enter. Write the prompt, then
 submit it yourself. Text paste stays native and unchanged.
 
-This needs an iTerm2 workspace opened with the current `nc` command. The SSH account must accept a
-non-interactive key-based SSH connection. Images are limited to 20 MB and use mode `0600` on the VPS.
+The current `nc ssh` command makes the open workspace a private OpenSSH connection-sharing master.
+Image upload reuses that authenticated connection. Key, SSH-agent, and password-authenticated
+workspaces do not need a second login. Reopen a workspace once if an older `nc` version created it.
+Images are limited to 20 MB. The remote directory uses mode `0700`; each image uses mode `0600`.
+Noturcode stops an upload after 30 seconds. It refuses stale or non-Noturcode SSH control sockets.
 
 When the SSH connection closes, the socket forward closes. The remote hook then returns `{}` and exits successfully, so the coding agent continues.
 

@@ -23,76 +23,44 @@ private enum RemoteImagePasteError: LocalizedError {
 }
 
 private actor RemoteImageUploader {
-    private struct Result {
-        let status: Int32
-        let output: String
-        let error: String
-
-        var diagnostic: String {
-            [output, error]
+    func upload(localURL: URL, host: String, controlPath: String?) throws -> String {
+        if let controlPath, !RemoteImageUploadPlan.isUsableControlSocket(controlPath) {
+            throw RemoteImagePasteError.commandFailed(
+                "This SSH workspace is closed or stale. Open it again with `nc`."
+            )
+        }
+        let fileName = RemoteImageUploadPlan.fileName()
+        guard let arguments = RemoteImageUploadPlan.sshArguments(
+            host: host,
+            fileName: fileName,
+            controlPath: controlPath
+        ) else {
+            throw RemoteImagePasteError.invalidHost
+        }
+        let upload: BoundedProcessResult
+        do {
+            upload = try BoundedProcessRunner.run(
+                executable: "/usr/bin/ssh",
+                arguments: arguments,
+                standardInputURL: localURL,
+                timeout: 30
+            )
+        } catch BoundedProcessRunnerError.timedOut {
+            throw RemoteImagePasteError.commandFailed("The image upload timed out after 30 seconds.")
+        }
+        let output = String(decoding: upload.output, as: UTF8.self)
+        let error = String(decoding: upload.error, as: UTF8.self)
+        guard upload.status == 0 else {
+            let diagnostic = [output, error]
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .joined(separator: "\n")
+            throw RemoteImagePasteError.commandFailed(Self.message(for: diagnostic, action: "upload the image to the VPS"))
         }
-    }
-
-    func upload(localURL: URL, host: String) throws -> String {
-        guard Self.valid(host: host) else { throw RemoteImagePasteError.invalidHost }
-        let remoteDirectory = ".cache/noturcode/attachments"
-        let fileName = "image-\(UUID().uuidString).png"
-        let upload = try run(
-            executable: "/usr/bin/ssh",
-            arguments: [
-                "-T",
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=8",
-                "--", host,
-                "umask 077; directory=\"$HOME/\(remoteDirectory)\"; "
-                    + "destination=\"$directory/\(fileName)\"; "
-                    + "mkdir -p \"$directory\" && "
-                    + "chmod 700 \"$HOME/.cache/noturcode\" \"$directory\" && "
-                    + "trap 'rm -f \"$destination\"' EXIT HUP INT TERM; "
-                    + "cat > \"$destination\" && chmod 600 \"$destination\" && "
-                    + "trap - EXIT HUP INT TERM && printf '%s' \"$destination\""
-            ],
-            standardInputURL: localURL
-        )
-        guard upload.status == 0 else {
-            throw RemoteImagePasteError.commandFailed(Self.message(for: upload.diagnostic, action: "upload the image to the VPS"))
-        }
-        let remotePath = upload.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard remotePath.hasPrefix("/"),
-              remotePath.unicodeScalars.allSatisfy({
-                  CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-/")).contains($0)
-              }) else {
+        guard let remotePath = RemoteImageUploadPlan.validatedRemotePath(output) else {
             throw RemoteImagePasteError.commandFailed("The VPS returned an invalid image path.")
         }
         return remotePath
-    }
-
-    private func run(executable: String, arguments: [String], standardInputURL: URL? = nil) throws -> Result {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = arguments
-        let inputHandle = try standardInputURL.map { try FileHandle(forReadingFrom: $0) }
-        process.standardInput = inputHandle ?? FileHandle.nullDevice
-        defer { try? inputHandle?.close() }
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        try process.run()
-        process.waitUntilExit()
-        let output = String(decoding: outputPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        let error = String(decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        return Result(status: process.terminationStatus, output: output, error: error)
-    }
-
-    private static func valid(host: String) -> Bool {
-        guard !host.isEmpty, !host.hasPrefix("-"), host.count <= 255 else { return false }
-        return host.unicodeScalars.allSatisfy {
-            CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-@")).contains($0)
-        }
     }
 
     private static func message(for output: String, action: String) -> String {
@@ -114,7 +82,14 @@ final class RemoteImagePasteCoordinator {
         let matchingSession = sessions.first(where: {
             $0.terminal?.uniqueID == request.terminalSessionID
         })
-        let terminal = matchingSession?.terminal ?? TerminalTarget(sessionID: request.terminalSessionID)
+        let persistedTerminal = matchingSession?.terminal
+        let registeredTerminal = RemoteTerminalRegistry().targets().first {
+            $0.uniqueID == request.terminalSessionID
+        }
+        let terminal: TerminalTarget
+        terminal = registeredTerminal
+            ?? persistedTerminal
+            ?? TerminalTarget(sessionID: request.terminalSessionID)
         guard let localURL = try persistClipboardImage() else {
             guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return false }
             try await insert(text, into: terminal)
@@ -127,7 +102,11 @@ final class RemoteImagePasteCoordinator {
         guard let host = terminal.identity?.remoteHost, !host.isEmpty else {
             throw RemoteImagePasteError.notRemote
         }
-        let remotePath = try await uploader.upload(localURL: localURL, host: host)
+        let remotePath = try await uploader.upload(
+            localURL: localURL,
+            host: host,
+            controlPath: terminal.identity?.sshControlPath
+        )
         try await insert(remotePath, into: terminal)
         return true
     }
@@ -163,7 +142,9 @@ final class RemoteImagePasteCoordinator {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
-        guard png.count <= 20 * 1_024 * 1_024 else { throw RemoteImagePasteError.imageTooLarge }
+        guard png.count <= RemoteImageUploadPlan.maximumImageBytes else {
+            throw RemoteImagePasteError.imageTooLarge
+        }
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-remote-paste", isDirectory: true)
         try SecureLocalStorage.ensurePrivateDirectory(at: directory)
