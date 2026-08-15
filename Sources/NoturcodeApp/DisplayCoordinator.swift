@@ -49,9 +49,8 @@ struct NotchMetrics: Equatable, Sendable {
     // The panel frame already starts at screen.maxY. A second visual inset
     // creates a gap and also moves the hit region away from the visible dock.
     var surfaceTopInset: CGFloat { 0 }
-    var minimumDockRailHeight: CGFloat { hasHardwareNotch ? 50 : 42 }
-    var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }
-    var dockContentTopInset: CGFloat { hasHardwareNotch ? neckHeight + notchShoulderClearance : 0 }
+    var minimumDockRailHeight: CGFloat { hasHardwareNotch ? neckHeight : 42 }
+    var dockContentTopInset: CGFloat { 0 }
 
     func dockRailHeight(sessionCount: Int) -> CGFloat {
         return minimumDockRailHeight
@@ -69,10 +68,6 @@ struct NotchMetrics: Equatable, Sendable {
         let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         displayID = screenNumber?.uint32Value
             ?? UInt32(truncatingIfNeeded: ObjectIdentifier(screen).hashValue)
-        screenFrame = screen.frame
-        envelopeWidth = min(540, max(360, screen.frame.width))
-        envelopeHeight = min(570, max(300, screen.frame.height))
-
         if let left = screen.auxiliaryTopLeftArea,
            let right = screen.auxiliaryTopRightArea {
             let gap = max(0, right.minX - left.maxX)
@@ -84,6 +79,11 @@ struct NotchMetrics: Equatable, Sendable {
             neckWidth = 94
             neckHeight = 28
         }
+        screenFrame = screen.frame
+        envelopeWidth = hasHardwareNotch
+            ? min(820, max(520, screen.frame.width - 80))
+            : min(540, max(360, screen.frame.width))
+        envelopeHeight = min(570, max(300, screen.frame.height))
     }
 
     func sessionChipWidth(for name: String) -> CGFloat {
@@ -97,8 +97,18 @@ struct NotchMetrics: Equatable, Sendable {
         let chipSpacing = CGFloat(max(0, compactItemCount(sessionCount: sessionNames.count) - 1)) * 6
         let fixedContent: CGFloat = 28 + 19 + 16 + 1
         let contentWidth = fixedContent + chipWidths + chipSpacing
-        let minimumWidth = hasHardwareNotch ? neckWidth + 28 : 120
-        return min(envelopeWidth - 12, max(minimumWidth, contentWidth))
+        if hasHardwareNotch {
+            let wingMinimum = neckWidth + 2 * (widestChip + 34)
+            return min(envelopeWidth - 12, max(wingMinimum, contentWidth + neckWidth + 24))
+        }
+        return min(envelopeWidth - 12, max(120, contentWidth))
+    }
+
+    func expandedSurfaceWidth(sessionNames: [String]) -> CGFloat {
+        if hasHardwareNotch {
+            return max(min(420, envelopeWidth - 16), collapsedWidth(sessionNames: sessionNames))
+        }
+        return min(420, envelopeWidth - 16)
     }
 
     func expandedHeight(sessionCount: Int) -> CGFloat {
@@ -542,7 +552,7 @@ final class NotchPanelController {
         let width: CGFloat
         let height: CGFloat
         if state.isExpanded {
-            width = min(420, metrics.envelopeWidth - 16)
+            width = metrics.expandedSurfaceWidth(sessionNames: model.store.sessions.map(\.name))
             height = metrics.expandedSurfaceHeight(
                 sessionCount: sessionCount,
                 activityAdjustment: state.activityHeightAdjustment(in: model.store.sessions)

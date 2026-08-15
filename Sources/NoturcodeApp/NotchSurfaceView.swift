@@ -19,7 +19,9 @@ struct NotchSurfaceView: View {
     }
 
     private var surfaceWidth: CGFloat {
-        if state.isExpanded { return min(420, metrics.envelopeWidth - 16) }
+        if state.isExpanded {
+            return metrics.expandedSurfaceWidth(sessionNames: store.sessions.map(\.name))
+        }
         return metrics.collapsedWidth(sessionNames: store.sessions.map(\.name))
     }
 
@@ -284,6 +286,19 @@ private struct AdaptiveDockHeader: View {
     }
 
     var body: some View {
+        Group {
+            if metrics.hasHardwareNotch {
+                hardwareNotchHeader
+            } else {
+                floatingPillHeader
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(isExpanded ? "Noturcode quote" : "Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
+        .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
+    }
+
+    private var floatingPillHeader: some View {
         HStack(spacing: 8) {
             NoturcodeBrandMark(size: 19)
             Rectangle()
@@ -308,9 +323,51 @@ private struct AdaptiveDockHeader: View {
         .frame(height: metrics.dockRailHeight(sessionCount: sessions.count))
         .padding(.top, metrics.dockContentTopInset)
         .frame(maxHeight: .infinity, alignment: .top)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(isExpanded ? "Noturcode quote" : "Noturcode, \(sessions.count) connected sessions: \(sessionNames)")
-        .animation(.spring(response: 0.28, dampingFraction: 0.88), value: sessionIDs)
+    }
+
+    private var hardwareNotchHeader: some View {
+        let visibleSessions = Array(sessions.prefix(3))
+        let hiddenSessions = Array(sessions.dropFirst(3))
+        let itemCount = visibleSessions.count + (hiddenSessions.isEmpty ? 0 : 1)
+        let leftCount = itemCount / 2
+        let leftSessions = Array(visibleSessions.prefix(leftCount))
+        let rightSessions = Array(visibleSessions.dropFirst(leftCount))
+        let chipWidth = sessions.map { metrics.sessionChipWidth(for: $0.name) }.max() ?? 50
+
+        return HStack(spacing: 0) {
+            HStack(spacing: 8) {
+                NoturcodeBrandMark(size: 19)
+                Rectangle()
+                    .fill(.white.opacity(0.12))
+                    .frame(width: 1, height: 20)
+                hardwareSessionGroup(leftSessions, overflow: [], chipWidth: chipWidth)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+
+            Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
+
+            hardwareSessionGroup(rightSessions, overflow: hiddenSessions, chipWidth: chipWidth)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: metrics.neckHeight)
+    }
+
+    @ViewBuilder
+    private func hardwareSessionGroup(
+        _ values: [TrackedSession],
+        overflow: [TrackedSession],
+        chipWidth: CGFloat
+    ) -> some View {
+        HStack(spacing: 6) {
+            ForEach(values) { session in
+                sessionChip(session, width: chipWidth)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
+            }
+            if !overflow.isEmpty {
+                overflowChip(sessions: overflow, width: chipWidth)
+            }
+        }
     }
 
     @ViewBuilder

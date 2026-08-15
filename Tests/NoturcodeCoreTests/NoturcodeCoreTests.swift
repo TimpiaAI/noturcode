@@ -1220,7 +1220,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("disconnect-noturcode-"))
     }
 
-    func testHardwareNotchReservesItsFullHeightAboveOneSessionRail() throws {
+    func testHardwareNotchUsesCameraHeightAsItsCompactRail() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1233,15 +1233,34 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(notch.contains("sessionStrip(sessions)"))
         XCTAssertFalse(notch.contains("sessionStrip(working)"))
         XCTAssertFalse(notch.contains("sessionStrip(attention)"))
-        XCTAssertFalse(notch.contains("Color.clear.frame(width: metrics.neckWidth"))
+        XCTAssertTrue(notch.contains("Color.clear.frame(width: metrics.neckWidth"))
         XCTAssertTrue(coordinator.contains("func dockRailHeight(sessionCount: Int) -> CGFloat"))
         XCTAssertTrue(coordinator.contains("return minimumDockRailHeight"))
         XCTAssertTrue(coordinator.contains("func compactItemCount(sessionCount: Int) -> Int"))
         XCTAssertTrue(coordinator.contains("min(3, sessionCount) + (sessionCount > 3 ? 1 : 0)"))
-        XCTAssertTrue(coordinator.contains("var notchShoulderClearance: CGFloat { hasHardwareNotch ? 4 : 0 }"))
-        XCTAssertTrue(coordinator.contains("neckHeight + notchShoulderClearance"))
+        XCTAssertTrue(coordinator.contains("hasHardwareNotch ? neckHeight : 42"))
+        XCTAssertTrue(coordinator.contains("var dockContentTopInset: CGFloat { 0 }"))
         XCTAssertTrue(coordinator.contains("func collapsedHeight(sessionCount: Int) -> CGFloat"))
         XCTAssertTrue(coordinator.contains("height = metrics.collapsedHeight(sessionCount: sessionCount)"))
+    }
+
+    func testBuiltInNotchUsesFusedWingsWhileExternalDisplayKeepsFloatingPill() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+
+        XCTAssertTrue(surface.contains("if metrics.hasHardwareNotch"))
+        XCTAssertTrue(surface.contains("hardwareNotchHeader"))
+        XCTAssertTrue(surface.contains("floatingPillHeader"))
+        XCTAssertTrue(surface.contains("Color.clear.frame(width: metrics.neckWidth"))
+        XCTAssertTrue(surface.contains("metrics.expandedSurfaceWidth(sessionNames:"))
+        XCTAssertTrue(coordinator.contains("? min(820"))
+        XCTAssertTrue(coordinator.contains("hasHardwareNotch ? neckHeight : 42"))
+        XCTAssertTrue(coordinator.contains("contentWidth + neckWidth"))
+        XCTAssertTrue(coordinator.contains("func expandedSurfaceWidth(sessionNames:"))
     }
 
     func testHardwareSurfaceAlwaysFillsTheTopShoulders() throws {

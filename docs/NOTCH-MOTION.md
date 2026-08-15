@@ -35,6 +35,17 @@ quote header does not remove or filter a session.
 The header content uses opacity only. Do not add scale, offset, blur, or matched
 geometry effects. The two content states must not be visible at the same time.
 
+On a built-in display with a physical notch, the compact surface is the notch:
+
+```text
+[brand + first sessions] [physical camera gap] [remaining sessions + +N]
+```
+
+The two wings stay at the native notch height. They reserve the camera gap with
+an empty layout region. The session identity stays mounted while the surface
+expands below it. External displays keep the floating pill and quote transition
+described above. Do not apply the fused-wing layout to an external display.
+
 ## Surface and detail motion
 
 - Expand: spring response `0.24`, damping `0.90`.
