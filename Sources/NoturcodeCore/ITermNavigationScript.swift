@@ -2,8 +2,10 @@ import Foundation
 
 public enum ITermNavigationScript {
     public static let source = """
-    on navigate(targetID)
+    on navigate(targetID, targetTTY)
         set wantedID to targetID as text
+        set wantedTTY to targetTTY as text
+        if wantedTTY is not "" and wantedTTY does not start with "/dev/" then set wantedTTY to "/dev/" & wantedTTY
         tell application "iTerm2"
             set targetWindowID to missing value
             repeat with terminalWindow in windows
@@ -18,6 +20,24 @@ public enum ITermNavigationScript {
                 end repeat
                 if targetWindowID is not missing value then exit repeat
             end repeat
+
+            -- A pane can keep its TTY while iTerm replaces its UUID. Use the
+            -- captured local TTY as the stable fallback and adopt the new UUID.
+            if targetWindowID is missing value and wantedTTY is not "" then
+                repeat with terminalWindow in windows
+                    repeat with terminalTab in tabs of terminalWindow
+                        repeat with terminalSession in sessions of terminalTab
+                            if (tty of terminalSession as text) is wantedTTY then
+                                set wantedID to unique ID of terminalSession as text
+                                set targetWindowID to id of terminalWindow
+                                exit repeat
+                            end if
+                        end repeat
+                        if targetWindowID is not missing value then exit repeat
+                    end repeat
+                    if targetWindowID is not missing value then exit repeat
+                end repeat
+            end if
 
             if targetWindowID is missing value then return "MISSING"
 

@@ -128,6 +128,13 @@ public struct TerminalTarget: Codable, Equatable, Sendable {
 
     public var uniqueID: String {
         if let identity {
+            if identity.application == .iterm,
+               let nativeSessionID = identity.nativeSessionID {
+                // TERM_SESSION_ID includes an iTerm layout prefix such as
+                // `w0t0p3:`. AppleScript's `unique ID` contains only the UUID.
+                return nativeSessionID.split(separator: ":").last.map(String.init)
+                    ?? nativeSessionID
+            }
             return identity.nativeSessionID
                 ?? identity.tmuxPane
                 ?? identity.zellijPaneID

@@ -91,7 +91,7 @@ actor ITermNavigator {
         guard let compiledScript else {
             return .failed(compilationError ?? "Noturcode could not prepare iTerm2 navigation.")
         }
-        let event = appleEvent(handler: "navigate", arguments: [target.uniqueID])
+        let event = appleEvent(handler: "navigate", arguments: [target.uniqueID, target.tty ?? ""])
         var error: NSDictionary?
         let result = compiledScript.executeAppleEvent(event, error: &error).stringValue
         if let error {

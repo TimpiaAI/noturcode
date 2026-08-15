@@ -327,8 +327,13 @@ struct NoturcodeBridgeMain {
     }
 
     private static func terminalIdentity() -> String? {
-        let environment = ProcessInfo.processInfo.environment
-        return TerminalIdentity.capture(environment: environment, sourceProcessID: getppid())?.sessionID
+        var environment = ProcessInfo.processInfo.environment
+        let parentPID = getppid()
+        if environment["TTY"]?.isEmpty != false,
+           let tty = ProcessAncestry.terminalTTY(pid: parentPID) {
+            environment["TTY"] = tty
+        }
+        return TerminalIdentity.capture(environment: environment, sourceProcessID: parentPID)?.sessionID
     }
 
     private static func option(_ name: String, in arguments: [String]) -> String? {

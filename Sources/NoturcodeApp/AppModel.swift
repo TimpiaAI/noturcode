@@ -240,8 +240,10 @@ final class AppModel: ObservableObject {
             case .missing:
                 logNavigation("missing", session: session)
                 let terminalName = target.applicationKind.displayName
-                showStaleMessage("\(session.name) is no longer open in \(terminalName).")
-                store.remove(session.key, staleMessage: "\(session.name) is no longer open in \(terminalName).")
+                showStaleMessage(
+                    "Could not focus \(session.name) in \(terminalName). "
+                    + "The session is still connected. Try again or open its terminal manually."
+                )
             case let .failed(message):
                 logNavigation("failed:\(message)", session: session)
                 showStaleMessage(message)

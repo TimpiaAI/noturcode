@@ -2242,6 +2242,9 @@ final class NoturcodeCoreTests: XCTestCase {
     func testExactITermNavigationScriptCompilesAndVerifiesUUID() throws {
         let source = ITermNavigationScript.source
         XCTAssertTrue(source.contains("set wantedID to targetID as text"))
+        XCTAssertTrue(source.contains("set wantedTTY to targetTTY as text"))
+        XCTAssertTrue(source.contains("tty of terminalSession as text"))
+        XCTAssertTrue(source.contains("if wantedTTY is not \"\""))
         XCTAssertTrue(source.contains("set targetWindowID to id of terminalWindow"))
         XCTAssertTrue(source.contains("first window whose id is targetWindowID"))
         XCTAssertTrue(source.contains("select targetWindow"))
@@ -2312,7 +2315,32 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(model.contains("for attempt in 0..<8"))
         XCTAssertFalse(model.contains("try await Task.sleep(for: .milliseconds(60))"))
         XCTAssertTrue(model.contains("logNavigation(\"revealed\", session: session)"))
+        XCTAssertTrue(model.contains("Could not focus"))
+        XCTAssertTrue(model.contains("The session is still connected"))
+        XCTAssertFalse(model.contains("store.remove(session.key, staleMessage:"))
         XCTAssertFalse(model.contains("requestAccessIfNeeded()"))
+    }
+
+    func testEncodedITermSessionTargetUsesUUIDAndKeepsTTYFallback() throws {
+        let uuid = "23FB1192-1E94-4C6D-AFD8-958D891E2C3B"
+        let target = TerminalTarget(
+            sessionID: "terminal:iterm:session:w0t0p3%3A\(uuid)?tty=%2Fdev%2Fttys011"
+        )
+
+        XCTAssertEqual(target.identity?.nativeSessionID, "w0t0p3:\(uuid)")
+        XCTAssertEqual(target.uniqueID, uuid)
+        XCTAssertEqual(target.tty, "/dev/ttys011")
+    }
+
+    func testBridgeTerminalIdentityAddsControllingTTYForRemoteNavigationFallback() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+
+        XCTAssertTrue(bridge.contains("ProcessAncestry.terminalTTY(pid: parentPID)"))
+        XCTAssertTrue(bridge.contains("environment[\"TTY\"] = tty"))
     }
 
     func testITermTTYLookupIsReadOnlyAndCompiles() throws {
