@@ -80,6 +80,26 @@ actor ITermPromptSender {
         return sendExact(prompt, to: rebound)
     }
 
+    /// Inserts a bracketed paste into one exact iTerm session. It does not
+    /// press Enter, so Codex can attach a pasted image path to the open draft.
+    func insertWithoutSubmitting(_ text: String, to target: TerminalTarget) -> ITermPromptResult {
+        if usesFixture { return .sent }
+        guard target.applicationKind == .iterm,
+              target.identity?.multiplexer == nil,
+              let compiledScript else {
+            return .failed("Direct image paste is available in an iTerm2 SSH workspace.")
+        }
+        let event = appleEvent(handler: "insertWithoutSubmitting", arguments: [target.uniqueID, text])
+        var error: NSDictionary?
+        let result = compiledScript.executeAppleEvent(event, error: &error).stringValue
+        if let error { return .failed(Self.userFacingError(error)) }
+        switch result {
+        case "FOUND": return .sent
+        case "MISSING": return .missing
+        default: return .failed("iTerm2 returned an unexpected image paste response.")
+        }
+    }
+
     private func sendExact(_ prompt: String, to target: TerminalTarget) -> ITermPromptResult {
         guard let identity = target.identity else {
             return sendToITerm(prompt, target: target)

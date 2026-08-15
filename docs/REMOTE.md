@@ -11,13 +11,14 @@ source ~/.config/noturcode/shell.zsh
 nc
 ```
 
-The interactive command gives four choices:
+The interactive command gives five choices:
 
 ```text
 1. Pair a VPS
 2. Open an SSH workspace
-3. Check setup
-4. Exit
+3. Resume an existing Codex chat
+4. Check setup
+5. Exit
 ```
 
 ### Pair once
@@ -41,6 +42,16 @@ No root command runs. No existing hook group is overwritten.
 Run `nc` again and choose `Open an SSH workspace`.
 
 The command opens a normal interactive SSH shell. It also creates a unique Unix-socket forward for that shell and exports the exact local terminal identity. Start Claude, Codex, or Gemini inside it. Use `/nc NAME` inside the coding agent as usual.
+
+### Paste a Mac image into remote Codex
+
+Copy an image on the Mac. Focus the Codex input in the iTerm2 SSH workspace. Press `Command-V`.
+Noturcode writes a private PNG, copies it to `~/.cache/noturcode/attachments/` on the VPS, and
+pastes the remote path as a Codex image attachment. It does not press Enter. Write the prompt, then
+submit it yourself. Text paste stays native and unchanged.
+
+This needs an iTerm2 workspace opened with the current `nc` command. The SSH account must accept a
+non-interactive key-based SSH connection. Images are limited to 20 MB and use mode `0600` on the VPS.
 
 When the SSH connection closes, the socket forward closes. The remote hook then returns `{}` and exits successfully, so the coding agent continues.
 

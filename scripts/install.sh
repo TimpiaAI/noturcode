@@ -67,11 +67,18 @@ fi
 
 open -g "$app_destination" --args --background
 
-# Register the context-menu provider immediately without restarting iTerm2.
-# AutoLaunch keeps it available on later iTerm2 launches.
+# Reload only the small Noturcode provider. Never restart iTerm2 or its sessions.
+# AutoLaunch keeps the provider available on later iTerm2 launches.
 if [[ -x /Applications/iTerm.app/Contents/Resources/it2run ]] \
-  && pgrep -x iTerm2 >/dev/null \
-  && ! pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' >/dev/null; then
+  && pgrep -x iTerm2 >/dev/null; then
+  provider_pids=(${(f)"$(pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' 2>/dev/null || true)"})
+  if (( ${#provider_pids} > 0 )); then
+    kill -- $provider_pids 2>/dev/null || true
+    for _ in {1..20}; do
+      pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' >/dev/null || break
+      sleep 0.05
+    done
+  fi
   /Applications/iTerm.app/Contents/Resources/it2run "$iterm_script" \
     >/tmp/noturcode-iterm-context-menu.log 2>&1 &
 fi

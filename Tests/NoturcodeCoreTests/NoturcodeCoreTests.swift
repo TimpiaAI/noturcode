@@ -5,6 +5,61 @@ import XCTest
 @testable import NoturcodeCore
 
 final class NoturcodeCoreTests: XCTestCase {
+    func testRemoteTerminalIdentityRoundTripsUploadHost() throws {
+        let identity = TerminalIdentity(
+            application: .iterm,
+            nativeSessionID: "w0t0p3:ABC-123",
+            remoteHost: "gprc"
+        )
+
+        let parsed = try XCTUnwrap(TerminalIdentity.parse(sessionID: identity.sessionID))
+        XCTAssertEqual(parsed.nativeSessionID, "w0t0p3:ABC-123")
+        XCTAssertEqual(parsed.remoteHost, "gprc")
+    }
+
+    func testRemoteImagePasteUsesObservedCommandVWithoutBlockingTextPaste() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let provider = try String(contentsOf: repository.appendingPathComponent("Integrations/iterm2-ask-noturcode.py"))
+        let cli = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-cli.zsh"))
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+        let model = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+        let uploader = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RemoteImagePasteCoordinator.swift"))
+        let installer = try String(contentsOf: repository.appendingPathComponent("scripts/install.sh"))
+
+        XCTAssertTrue(provider.contains("KeystrokeMonitor"))
+        XCTAssertTrue(provider.contains("Keycode.ANSI_V"))
+        XCTAssertTrue(provider.contains("Modifier.COMMAND"))
+        XCTAssertTrue(provider.contains("paste-image"))
+        XCTAssertTrue(provider.contains("KeystrokeFilter"))
+        XCTAssertTrue(provider.contains("forbidden_modifiers"))
+        XCTAssertTrue(cli.contains("terminal-id --remote-host \"$host\""))
+        XCTAssertTrue(bridge.contains("case \"paste-image\""))
+        XCTAssertTrue(model.contains("TerminalImagePasteRequest"))
+        XCTAssertTrue(model.contains("remoteImagePaste.handle"))
+        XCTAssertTrue(uploader.contains("NSPasteboard.general"))
+        XCTAssertTrue(uploader.contains("NSPasteboard.general.string(forType: .string)"))
+        XCTAssertTrue(uploader.contains("TerminalTarget(sessionID: request.terminalSessionID)"))
+        XCTAssertTrue(uploader.contains("/usr/bin/scp"))
+        XCTAssertTrue(uploader.contains("insertWithoutSubmitting"))
+        XCTAssertTrue(installer.contains("Reload only the small Noturcode provider"))
+        XCTAssertFalse(installer.contains("killall iTerm"))
+    }
+
+    func testITermImagePathInsertDoesNotPressEnter() throws {
+        let source = ITermPromptScript.source
+        let start = try XCTUnwrap(source.range(of: "on insertWithoutSubmitting"))
+        let tail = source[start.lowerBound...]
+        let end = try XCTUnwrap(tail.range(of: "end insertWithoutSubmitting"))
+        let handler = tail[..<end.upperBound]
+
+        XCTAssertTrue(handler.contains("pasteStart & outgoingText & pasteEnd"))
+        XCTAssertTrue(handler.contains("write text"))
+        XCTAssertFalse(handler.contains("ASCII character 13"))
+    }
+
     func testAutomaticLaunchPausePersistsUntilExplicitResume() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-launch-policy-\(UUID().uuidString)", isDirectory: true)

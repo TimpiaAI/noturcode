@@ -28,11 +28,13 @@ struct NoturcodeBridgeMain {
         case "pair-code":
             runPairCode(arguments: Array(arguments.dropFirst()))
         case "terminal-id":
-            runTerminalID()
+            runTerminalID(arguments: Array(arguments.dropFirst()))
         case "socket-path":
             writeStandardOutput(NoturcodeSocket.path + "\n")
         case "ask-selection":
             runAskSelection(arguments: Array(arguments.dropFirst()))
+        case "paste-image":
+            runPasteImage(arguments: Array(arguments.dropFirst()))
         default:
             writeStandardError("Unknown command: \(command)\n")
             Foundation.exit(64)
@@ -231,12 +233,27 @@ struct NoturcodeBridgeMain {
         }
     }
 
-    private static func runTerminalID() {
-        guard let identity = terminalIdentity(), !identity.isEmpty else {
+    private static func runTerminalID(arguments: [String]) {
+        guard let identity = terminalIdentity(remoteHost: option("--remote-host", in: arguments)), !identity.isEmpty else {
             writeStandardError("Noturcode could not identify this terminal.\n")
             Foundation.exit(1)
         }
         writeStandardOutput(identity + "\n")
+    }
+
+    private static func runPasteImage(arguments: [String]) {
+        guard let sessionID = option("--session", in: arguments), !sessionID.isEmpty else {
+            writeStandardError("paste-image requires --session\n")
+            Foundation.exit(64)
+        }
+        do {
+            let request = TerminalImagePasteRequest(terminalSessionID: sessionID)
+            try send(payload: JSONEncoder().encode(request), launchIfNeeded: false)
+            writeStandardOutput("ok\n")
+        } catch {
+            writeStandardError("\(error.localizedDescription)\n")
+            Foundation.exit(1)
+        }
     }
 
     private static func runAskSelection(arguments: [String]) {
@@ -326,8 +343,11 @@ struct NoturcodeBridgeMain {
         try? process.run()
     }
 
-    private static func terminalIdentity() -> String? {
+    private static func terminalIdentity(remoteHost: String? = nil) -> String? {
         var environment = ProcessInfo.processInfo.environment
+        if let remoteHost, !remoteHost.isEmpty {
+            environment["NOTURCODE_REMOTE_HOST"] = remoteHost
+        }
         let parentPID = getppid()
         if environment["TTY"]?.isEmpty != false,
            let tty = ProcessAncestry.terminalTTY(pid: parentPID) {

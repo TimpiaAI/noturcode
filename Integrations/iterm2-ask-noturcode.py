@@ -43,4 +43,46 @@ async def main(connection):
     )
     record("provider registered")
 
+    async def watch_image_paste():
+        app = await iterm2.async_get_app(connection)
+        paste_pattern = iterm2.KeystrokePattern()
+        paste_pattern.required_modifiers = [iterm2.Modifier.COMMAND]
+        paste_pattern.forbidden_modifiers = [
+            iterm2.Modifier.CONTROL,
+            iterm2.Modifier.OPTION,
+            iterm2.Modifier.SHIFT,
+            iterm2.Modifier.FUNCTION,
+            iterm2.Modifier.NUMPAD,
+        ]
+        paste_pattern.keycodes = [iterm2.Keycode.ANSI_V]
+        async with iterm2.KeystrokeFilter(connection, [paste_pattern]):
+            async with iterm2.KeystrokeMonitor(connection) as monitor:
+                while True:
+                    key = await monitor.async_get()
+                    if key.keycode != iterm2.Keycode.ANSI_V:
+                        continue
+                    if set(key.modifiers) != {iterm2.Modifier.COMMAND}:
+                        continue
+                    window = app.current_terminal_window
+                    tab = window.current_tab if window else None
+                    session = tab.current_session if tab else None
+                    if not session:
+                        continue
+                    try:
+                        process = await asyncio.create_subprocess_exec(
+                            BRIDGE, "paste-image", "--session", session.session_id,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        output, error = await process.communicate()
+                        record(
+                            f"clipboard paste session={session.session_id!r} exit={process.returncode} "
+                            f"stdout={output.decode(errors='replace').strip()!r} "
+                            f"stderr={error.decode(errors='replace').strip()!r}"
+                        )
+                    except Exception as error:
+                        record(f"clipboard paste exception={error!r}")
+
+    await watch_image_paste()
+
 iterm2.run_forever(main)

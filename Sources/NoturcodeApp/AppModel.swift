@@ -73,6 +73,7 @@ final class AppModel: ObservableObject {
     let paneHighlight = TerminalPaneHighlightCoordinator()
     let transcriptReader = AgentTranscriptReader()
     let terminalPromptSender = ITermPromptSender()
+    lazy var remoteImagePaste = RemoteImagePasteCoordinator(terminalSender: terminalPromptSender)
     lazy var nativeSessions = NativeSessionCoordinator { [weak self] event in
         await MainActor.run { self?.receive(event) }
     }
@@ -138,6 +139,21 @@ final class AppModel: ObservableObject {
         }
 
         let server = UnixSocketServer { [weak self] data in
+            if let request = try? JSONDecoder().decode(TerminalImagePasteRequest.self, from: data),
+               request.type == "terminalImagePaste" {
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    do {
+                        if try await remoteImagePaste.handle(request: request, sessions: store.sessions) {
+                            sounds.play(.send)
+                        }
+                    } catch {
+                        showStaleMessage(error.localizedDescription)
+                        sounds.play(.failed)
+                    }
+                }
+                return Data("{\"ok\":true}".utf8)
+            }
             if let request = try? JSONDecoder().decode(SelectionContextRequest.self, from: data),
                request.type == "selectionContext" {
                 Task { @MainActor in
