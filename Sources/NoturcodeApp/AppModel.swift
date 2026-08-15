@@ -139,6 +139,20 @@ final class AppModel: ObservableObject {
         }
 
         let server = UnixSocketServer { [weak self] data in
+            if let request = try? JSONDecoder().decode(TerminalImagePasteSessionsRequest.self, from: data),
+               request.type == "terminalImagePasteSessions" {
+                let sessionIDs = SessionPersistence().load().compactMap { session -> String? in
+                    guard let terminal = session.terminal,
+                          terminal.applicationKind == .iterm,
+                          let remoteHost = terminal.identity?.remoteHost,
+                          !remoteHost.isEmpty else { return nil }
+                    return terminal.uniqueID
+                } ?? []
+                return Self.encodeRemoteResponse(TerminalImagePasteSessionsResponse(
+                    ok: true,
+                    sessionIDs: Array(Set(sessionIDs)).sorted()
+                ))
+            }
             if let request = try? JSONDecoder().decode(TerminalImagePasteRequest.self, from: data),
                request.type == "terminalImagePaste" {
                 Task { @MainActor [weak self] in

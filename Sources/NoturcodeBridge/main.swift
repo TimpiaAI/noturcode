@@ -35,6 +35,8 @@ struct NoturcodeBridgeMain {
             runAskSelection(arguments: Array(arguments.dropFirst()))
         case "paste-image":
             runPasteImage(arguments: Array(arguments.dropFirst()))
+        case "paste-image-sessions":
+            runPasteImageSessions()
         default:
             writeStandardError("Unknown command: \(command)\n")
             Foundation.exit(64)
@@ -250,6 +252,22 @@ struct NoturcodeBridgeMain {
             let request = TerminalImagePasteRequest(terminalSessionID: sessionID)
             try send(payload: JSONEncoder().encode(request), launchIfNeeded: false)
             writeStandardOutput("ok\n")
+        } catch {
+            writeStandardError("\(error.localizedDescription)\n")
+            Foundation.exit(1)
+        }
+    }
+
+    private static func runPasteImageSessions() {
+        do {
+            let request = TerminalImagePasteSessionsRequest()
+            let response = try UnixSocketClient.send(JSONEncoder().encode(request))
+            guard let decoded = try? JSONDecoder().decode(TerminalImagePasteSessionsResponse.self, from: response),
+                  decoded.ok else {
+                throw UnixSocketError.responseTimeout
+            }
+            FileHandle.standardOutput.write(response)
+            writeStandardOutput("\n")
         } catch {
             writeStandardError("\(error.localizedDescription)\n")
             Foundation.exit(1)
