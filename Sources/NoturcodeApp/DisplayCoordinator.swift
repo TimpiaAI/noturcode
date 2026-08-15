@@ -502,13 +502,12 @@ final class NotchPanelController {
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
-        // Keep the surface above both the menu bar and status items. Native
-        // notch overlays use mainMenu + 3; statusBar + 1 can still sit below
-        // menu extras and makes the hardware surface appear recessed.
-        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
+        // isFloatingPanel resets the AppKit level to .floating. Apply the
+        // notch level after it so the surface stays above the menu bar.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 3)
         panel.becomesKeyOnlyIfNeeded = true
         panel.allowsToolTipsWhenApplicationIsInactive = true
         panel.isMovable = false

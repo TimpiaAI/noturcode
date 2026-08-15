@@ -2014,6 +2014,21 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(source.contains("var surfaceTopInset: CGFloat { hasHardwareNotch ? 0 : 7 }"))
     }
 
+    func testNotchPanelLevelIsAppliedAfterFloatingPanelConfiguration() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let controllerStart = try XCTUnwrap(source.range(of: "final class NotchPanelController"))
+        let updateStart = try XCTUnwrap(source.range(of: "\n    func update(screen:", range: controllerStart.lowerBound..<source.endIndex))
+        let initializer = String(source[controllerStart.lowerBound..<updateStart.lowerBound])
+        let floating = try XCTUnwrap(initializer.range(of: "panel.isFloatingPanel = true"))
+        let level = try XCTUnwrap(initializer.range(of: "panel.level = NSWindow.Level"))
+
+        XCTAssertLessThan(floating.lowerBound, level.lowerBound)
+    }
+
     func testNotchPanelAcceptsMouseMovedEventsForClickableCursorRegions() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
