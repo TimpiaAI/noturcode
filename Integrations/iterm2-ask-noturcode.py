@@ -4,10 +4,12 @@ import datetime
 import json
 import os
 import time
+import urllib.parse
 import iterm2
 
 BRIDGE = os.path.expanduser("~/Library/Application Support/Noturcode/bin/noturcode-bridge")
 LOG = os.path.expanduser("~/Library/Application Support/Noturcode/selection-provider.log")
+STATE = os.path.expanduser("~/Library/Application Support/Noturcode/connected-sessions.json")
 
 def record(message):
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
@@ -106,18 +108,36 @@ async def main(connection):
         finally:
             record(f"clipboard filter detached session={session_id!r}")
 
-    async def remote_paste_sessions():
+    state_signature = None
+    cached_sessions = set()
+
+    def remote_paste_sessions():
+        nonlocal state_signature, cached_sessions
         try:
-            process = await asyncio.create_subprocess_exec(
-                BRIDGE, "paste-image-sessions",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            output, _ = await process.communicate()
-            if process.returncode != 0:
-                return None
-            payload = json.loads(output.decode("utf-8"))
-            return {value for value in payload.get("sessionIDs", []) if value}
+            metadata = os.stat(STATE)
+            signature = (metadata.st_mtime_ns, metadata.st_size)
+            if signature == state_signature:
+                return set(cached_sessions)
+            with open(STATE, "r", encoding="utf-8") as handle:
+                tracked_sessions = json.load(handle)
+            found = set()
+            prefix = "terminal:iterm:session:"
+            for tracked in tracked_sessions:
+                encoded = (tracked.get("terminal") or {}).get("sessionID") or ""
+                if not encoded.startswith(prefix):
+                    continue
+                identity = encoded[len(prefix):]
+                native_encoded, _, query = identity.partition("?")
+                values = urllib.parse.parse_qs(query)
+                if not values.get("remoteHost", [""])[0]:
+                    continue
+                native_id = urllib.parse.unquote(native_encoded)
+                session_id = native_id.rsplit(":", 1)[-1]
+                if session_id:
+                    found.add(session_id)
+            state_signature = signature
+            cached_sessions = found
+            return set(found)
         except Exception as error:
             record(f"clipboard session discovery exception={error!r}")
             return None
@@ -125,7 +145,7 @@ async def main(connection):
     async def watch_image_paste():
         tasks = {}
         while True:
-            wanted = await remote_paste_sessions()
+            wanted = remote_paste_sessions()
             if wanted is None:
                 await asyncio.sleep(1.0)
                 continue

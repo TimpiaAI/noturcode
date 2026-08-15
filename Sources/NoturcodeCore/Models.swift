@@ -750,24 +750,6 @@ public struct TerminalImagePasteRequest: Codable, Equatable, Sendable {
     }
 }
 
-public struct TerminalImagePasteSessionsRequest: Codable, Equatable, Sendable {
-    public let type: String
-
-    public init() {
-        type = "terminalImagePasteSessions"
-    }
-}
-
-public struct TerminalImagePasteSessionsResponse: Codable, Equatable, Sendable {
-    public let ok: Bool
-    public let sessionIDs: [String]
-
-    public init(ok: Bool, sessionIDs: [String]) {
-        self.ok = ok
-        self.sessionIDs = sessionIDs
-    }
-}
-
 public struct BridgeEvent: Codable, Equatable, Sendable {
     public var kind: BridgeEventKind
     public var source: AgentSource
