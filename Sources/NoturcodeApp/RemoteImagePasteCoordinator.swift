@@ -40,58 +40,43 @@ private actor RemoteImageUploader {
         guard Self.valid(host: host) else { throw RemoteImagePasteError.invalidHost }
         let remoteDirectory = ".cache/noturcode/attachments"
         let fileName = "image-\(UUID().uuidString).png"
-        let prepare = try run(
+        let upload = try run(
             executable: "/usr/bin/ssh",
             arguments: [
+                "-T",
                 "-o", "BatchMode=yes",
                 "-o", "ConnectTimeout=8",
                 "--", host,
-                "umask 077; mkdir -p \"$HOME/\(remoteDirectory)\"; chmod 700 \"$HOME/.cache/noturcode\" \"$HOME/\(remoteDirectory)\"; printf '%s' \"$HOME\""
-            ]
+                "umask 077; directory=\"$HOME/\(remoteDirectory)\"; "
+                    + "destination=\"$directory/\(fileName)\"; "
+                    + "mkdir -p \"$directory\" && "
+                    + "chmod 700 \"$HOME/.cache/noturcode\" \"$directory\" && "
+                    + "trap 'rm -f \"$destination\"' EXIT HUP INT TERM; "
+                    + "cat > \"$destination\" && chmod 600 \"$destination\" && "
+                    + "trap - EXIT HUP INT TERM && printf '%s' \"$destination\""
+            ],
+            standardInputURL: localURL
         )
-        guard prepare.status == 0 else {
-            throw RemoteImagePasteError.commandFailed(Self.message(for: prepare.diagnostic, action: "prepare the VPS image folder"))
+        guard upload.status == 0 else {
+            throw RemoteImagePasteError.commandFailed(Self.message(for: upload.diagnostic, action: "upload the image to the VPS"))
         }
-        let remoteHome = prepare.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard remoteHome.hasPrefix("/"),
-              remoteHome.unicodeScalars.allSatisfy({
+        let remotePath = upload.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard remotePath.hasPrefix("/"),
+              remotePath.unicodeScalars.allSatisfy({
                   CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "._-/")).contains($0)
               }) else {
-            throw RemoteImagePasteError.commandFailed("The VPS returned an invalid home folder.")
-        }
-        let remotePath = "\(remoteHome)/\(remoteDirectory)/\(fileName)"
-        let copy = try run(
-            executable: "/usr/bin/scp",
-            arguments: [
-                "-q",
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=8",
-                "--", localURL.path, "\(host):\(remotePath)"
-            ]
-        )
-        guard copy.status == 0 else {
-            throw RemoteImagePasteError.commandFailed(Self.message(for: copy.diagnostic, action: "copy the image to the VPS"))
-        }
-        let protect = try run(
-            executable: "/usr/bin/ssh",
-            arguments: [
-                "-o", "BatchMode=yes",
-                "-o", "ConnectTimeout=8",
-                "--", host,
-                "chmod 600 \"\(remotePath)\""
-            ]
-        )
-        guard protect.status == 0 else {
-            throw RemoteImagePasteError.commandFailed(Self.message(for: protect.diagnostic, action: "protect the VPS image"))
+            throw RemoteImagePasteError.commandFailed("The VPS returned an invalid image path.")
         }
         return remotePath
     }
 
-    private func run(executable: String, arguments: [String]) throws -> Result {
+    private func run(executable: String, arguments: [String], standardInputURL: URL? = nil) throws -> Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
-        process.standardInput = FileHandle.nullDevice
+        let inputHandle = try standardInputURL.map { try FileHandle(forReadingFrom: $0) }
+        process.standardInput = inputHandle ?? FileHandle.nullDevice
+        defer { try? inputHandle?.close() }
         let outputPipe = Pipe()
         let errorPipe = Pipe()
         process.standardOutput = outputPipe
