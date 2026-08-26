@@ -17,9 +17,9 @@
   <img alt="Local only" src="https://img.shields.io/badge/data-local--only-86efac">
 </p>
 
-![Noturcode notch session list with demo data](docs/images/noturcode-notch-demo.png)
+![The real Noturcode notch session list showing Pi, OMP, and Hermes Agent sessions](docs/images/noturcode-notch-demo.png)
 
-> The screenshots in this README are clearly labelled mockups made from sanitized demo data. No private terminal transcript or customer project is included.
+> These are captures of the native macOS app. They use sanitized fixture sessions, so no private transcript or project data appears.
 
 ## Why Noturcode
 
@@ -34,7 +34,7 @@ Noturcode is a small native companion for the terminal you already use:
 - **Keep control local.** No account, telemetry, cloud relay, or hosted transcript database. Hooks write to a user-owned Unix socket on the same Mac.
 - **Keep your setup reversible.** Integration setup is explicit, existing hook files are backed up, and the uninstall path removes only Noturcode-owned entries.
 
-![Noturcode full conversation workspace with demo data](docs/images/noturcode-workspace-demo.png)
+![The real Noturcode conversation and agent workflow workspace](docs/images/noturcode-workspace-demo.png)
 
 Noturcode is an open-source Vibe Island alternative, but it is deliberately not positioned as another colored notch notifier. The project is working toward a reliable local session operating layer: status, conversation, orchestration, exact return, and control.
 
