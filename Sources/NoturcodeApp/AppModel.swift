@@ -177,29 +177,29 @@ final class AppModel: ObservableObject {
                request.type == "terminalImagePaste" {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    let pasteSession = store.sessions.first {
+                    let pasteSession = self.store.sessions.first {
                         $0.terminal?.uniqueID == request.terminalSessionID
                     }
                     do {
-                        if try await remoteImagePaste.handle(
+                        if try await self.remoteImagePaste.handle(
                             request: request,
-                            sessions: store.sessions,
+                            sessions: self.store.sessions,
                             progress: { [weak self] stage in
                                 guard let self, let pasteSession else { return }
-                                announcements.updateRemoteImagePaste(session: pasteSession, stage: stage)
+                                self.announcements.updateRemoteImagePaste(session: pasteSession, stage: stage)
                             }
                         ) {
-                            sounds.play(.send)
+                            self.sounds.play(.send)
                         }
                     } catch {
                         if let pasteSession {
-                            announcements.updateRemoteImagePaste(
+                            self.announcements.updateRemoteImagePaste(
                                 session: pasteSession,
                                 stage: .failed(message: error.localizedDescription)
                             )
                         }
-                        showStaleMessage(error.localizedDescription)
-                        sounds.play(.failed)
+                        self.showStaleMessage(error.localizedDescription)
+                        self.sounds.play(.failed)
                     }
                 }
                 return Data("{\"ok\":true}".utf8)

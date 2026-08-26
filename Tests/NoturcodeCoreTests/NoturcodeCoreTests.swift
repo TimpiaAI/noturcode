@@ -148,7 +148,12 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(provider.contains("KeystrokeMonitor(connection, session_id)"))
         XCTAssertTrue(provider.contains("KeystrokeFilter(connection, patterns, session_id)"))
         XCTAssertTrue(provider.contains("Modifier.CONTROL"))
-        XCTAssertFalse(provider.contains("connected-sessions.json"))
+        let remotePasteStart = try XCTUnwrap(provider.range(of: "    def remote_paste_sessions():"))
+        let paneTrackingStart = try XCTUnwrap(provider.range(of: "    def normalized_terminal_id(value):"))
+        let remotePasteProvider = String(
+            provider[remotePasteStart.lowerBound..<paneTrackingStart.lowerBound]
+        )
+        XCTAssertFalse(remotePasteProvider.contains("CONNECTED_SESSIONS"))
         XCTAssertFalse(provider.contains("BRIDGE, \"paste-image-sessions\""))
         XCTAssertTrue(cli.contains("terminal-id --remote-host \"$host\""))
         XCTAssertTrue(cli.contains("--ssh-control-path \"$control_socket\""))
@@ -177,7 +182,8 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(uploader.contains("RemoteTerminalRegistry().targets()"))
         XCTAssertTrue(installer.contains("Reload only the small Noturcode provider"))
         XCTAssertFalse(installer.contains("killall iTerm"))
-        XCTAssertTrue(remoteDocs.contains("Image upload reuses that authenticated connection"))
+        XCTAssertTrue(remoteDocs.contains("The `nc ssh` path reuses its OpenSSH control connection."))
+        XCTAssertTrue(remoteDocs.contains("remote image relay through the live Unix-socket forward."))
         XCTAssertFalse(remoteDocs.contains("must accept a\nnon-interactive key-based SSH connection"))
     }
 
