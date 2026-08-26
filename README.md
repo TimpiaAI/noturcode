@@ -4,16 +4,18 @@
 
 <h1 align="center">Noturcode</h1>
 
-<p align="center"><strong>Open-source session control for Claude Code, Codex, Pi, OMP, Hermes Agent, OpenCode, and coding-agent teams on macOS.</strong></p>
+<p align="center"><strong>Native macOS session manager for Claude Code, Codex, Pi, OMP, Hermes Agent, OpenCode, and other AI coding agents.</strong></p>
 
 <p align="center">
-  See every local agent at a glance, return to the exact iTerm2 pane, and open the real conversation, tools, files, and subagents without replacing your terminal.
+  Track every local agent, return to its exact iTerm2 pane, and inspect its transcript, tools, files, models, tokens, and subagents without replacing your terminal.
 </p>
 
 <p align="center">
+  <a href="https://github.com/TimpiaAI/noturcode/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/TimpiaAI/noturcode/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/TimpiaAI/noturcode/releases/tag/v0.1.0"><img alt="Release v0.1.0" src="https://img.shields.io/badge/release-v0.1.0-7dd3fc"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-7dd3fc"></a>
   <img alt="macOS 15+" src="https://img.shields.io/badge/macOS-15%2B-black">
-  <img alt="Native Swift" src="https://img.shields.io/badge/native-Swift-f97316">
+  <img alt="Swift" src="https://img.shields.io/badge/native-Swift-f97316">
   <img alt="Local only" src="https://img.shields.io/badge/data-local--only-86efac">
 </p>
 
@@ -21,11 +23,11 @@
 
 > These are captures of the native macOS app. They use sanitized fixture sessions, so no private transcript or project data appears.
 
-## Why Noturcode
+## A native AI coding agent session manager for macOS
 
-Running several coding agents creates a surprisingly physical problem: the useful work is scattered across tabs and splits. You lose the session that needs approval, notice a completed run late, or jump back to the wrong pane.
+Claude Code, Codex, Pi, OMP, Hermes Agent, and OpenCode can spread active work across many terminal tabs and splits. You can miss a session that needs approval, notice a completed run late, or return to the wrong pane.
 
-Noturcode is a small native companion for the terminal you already use:
+Noturcode puts those local coding-agent sessions in one native macOS app:
 
 - **Glance, then disappear.** Working, waiting, failed, and unread-completion states live in the notch or a compact external-display island.
 - **Return to the actual pane.** Session identity is captured when the agent connects; a click asks iTerm2 to reveal that exact session and visibly reports stale targets.
@@ -65,7 +67,7 @@ The table is intentionally capability-by-capability. “Detected” does not mea
 
 ## Install from source
 
-Public notarized binaries are not published yet. Until the release pipeline is signed and verified, build from source:
+The current source release is [Noturcode v0.1.0](https://github.com/TimpiaAI/noturcode/releases/tag/v0.1.0). Public notarized binaries are not published yet. Until the release pipeline is signed and verified, build from source:
 
 ```sh
 git clone https://github.com/TimpiaAI/noturcode.git
