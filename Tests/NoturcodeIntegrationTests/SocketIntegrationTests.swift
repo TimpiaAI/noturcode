@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import XCTest
 @testable import NoturcodeCore
@@ -46,6 +47,58 @@ final class SocketIntegrationTests: XCTestCase {
 
         let response = try UnixSocketClient.send(expected, path: socketPath)
         XCTAssertEqual(String(data: response, encoding: .utf8), #"{"ok":true}"#)
+        wait(for: [received], timeout: 1)
+    }
+
+    func testServerWaitsForPayloadAfterAcceptingAClient() throws {
+        let socketPath = "/tmp/nc-delayed-\(UUID().uuidString.prefix(8)).sock"
+        let payload = Data("delayed payload".utf8)
+        let received = expectation(description: "server received delayed payload")
+        let server = UnixSocketServer(path: socketPath) { data in
+            XCTAssertEqual(data, payload)
+            received.fulfill()
+            return Data("ack".utf8)
+        }
+        try server.start()
+        defer { server.stop() }
+
+        let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+        XCTAssertGreaterThanOrEqual(descriptor, 0)
+        defer { Darwin.close(descriptor) }
+        var noSigPipe: Int32 = 1
+        setsockopt(
+            descriptor,
+            SOL_SOCKET,
+            SO_NOSIGPIPE,
+            &noSigPipe,
+            socklen_t(MemoryLayout<Int32>.size)
+        )
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let bytes = Array(socketPath.utf8CString)
+        withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+            for (index, byte) in bytes.enumerated() {
+                buffer[index] = UInt8(bitPattern: byte)
+            }
+        }
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+            }
+        }
+        XCTAssertEqual(result, 0)
+
+        Thread.sleep(forTimeInterval: 0.1)
+        var wirePayload = payload
+        wirePayload.append(0x0A)
+        let written = wirePayload.withUnsafeBytes { buffer in
+            Darwin.write(descriptor, buffer.baseAddress, buffer.count)
+        }
+        XCTAssertEqual(written, wirePayload.count)
+        Darwin.shutdown(descriptor, SHUT_WR)
+        var response = [UInt8](repeating: 0, count: 16)
+        let count = Darwin.read(descriptor, &response, response.count)
+        XCTAssertEqual(String(decoding: response.prefix(max(0, count)), as: UTF8.self), "ack")
         wait(for: [received], timeout: 1)
     }
 

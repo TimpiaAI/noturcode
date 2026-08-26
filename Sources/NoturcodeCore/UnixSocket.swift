@@ -171,6 +171,12 @@ public final class UnixSocketServer: @unchecked Sendable {
                 if errno == EAGAIN || errno == EWOULDBLOCK { return }
                 return
             }
+            let clientFlags = fcntl(client, F_GETFL)
+            guard clientFlags >= 0,
+                  fcntl(client, F_SETFL, clientFlags & ~O_NONBLOCK) == 0 else {
+                Darwin.close(client)
+                continue
+            }
             var noSigPipe: Int32 = 1
             setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
             var timeout = timeval(tv_sec: 2, tv_usec: 0)
