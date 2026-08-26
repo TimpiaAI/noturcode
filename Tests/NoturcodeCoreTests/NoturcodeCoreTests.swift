@@ -2760,8 +2760,7 @@ final class NoturcodeCoreTests: XCTestCase {
         try await transport.start { _ in }
         let result = try await transport.request(
             method: "fixture/ping",
-            params: .object(["value": .string("pong")]),
-            timeout: .seconds(2)
+            params: .object(["value": .string("pong")])
         )
         XCTAssertEqual(result.firstString(for: ["value"]), "pong")
         await transport.stop()
