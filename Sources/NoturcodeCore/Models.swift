@@ -4,6 +4,9 @@ public enum AgentSource: String, Codable, CaseIterable, Sendable {
     case claude
     case codex
     case gemini
+    case pi
+    case omp
+    case hermes
     case opencode
     case grok
     case harness
@@ -13,6 +16,9 @@ public enum AgentSource: String, Codable, CaseIterable, Sendable {
         case .claude: "Claude Code"
         case .codex: "Codex"
         case .gemini: "Gemini CLI"
+        case .pi: "Pi"
+        case .omp: "OMP"
+        case .hermes: "Hermes Agent"
         case .opencode: "OpenCode"
         case .grok: "Grok"
         case .harness: "Harness"
@@ -655,6 +661,10 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
     public var sourceProcessID: Int32?
     public var cwd: String?
     public var transcriptPath: String?
+    public var provider: String?
+    public var model: String?
+    public var theme: String?
+    public var agentRole: String?
     public var state: SessionState
     public var connectedAt: Date
     public var lastPromptAt: Date
@@ -677,6 +687,10 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
         sourceProcessID: Int32?,
         cwd: String?,
         transcriptPath: String? = nil,
+        provider: String? = nil,
+        model: String? = nil,
+        theme: String? = nil,
+        agentRole: String? = nil,
         state: SessionState = .idle,
         connectedAt: Date,
         lastPromptAt: Date,
@@ -696,6 +710,10 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
         self.sourceProcessID = sourceProcessID
         self.cwd = cwd
         self.transcriptPath = transcriptPath
+        self.provider = provider
+        self.model = model
+        self.theme = theme
+        self.agentRole = agentRole
         self.state = state
         self.connectedAt = connectedAt
         self.lastPromptAt = lastPromptAt
@@ -723,12 +741,14 @@ public struct TrackedSession: Identifiable, Codable, Equatable, Sendable {
 
 public enum BridgeEventKind: String, Codable, Sendable {
     case connect
+    case metadataUpdated
     case disconnect
     case promptSubmitted
     case activityStarted
     case activityFinished
     case askingYou
     case responseCompleted
+    case turnInterrupted
     case failed
     case sessionStarted
     case sessionEnded
@@ -771,6 +791,10 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
     public var sourceProcessID: Int32?
     public var cwd: String?
     public var transcriptPath: String?
+    public var provider: String?
+    public var model: String?
+    public var theme: String?
+    public var agentRole: String?
     public var prompt: String?
     public var message: String?
     public var activity: String?
@@ -791,6 +815,10 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
         sourceProcessID: Int32? = nil,
         cwd: String? = nil,
         transcriptPath: String? = nil,
+        provider: String? = nil,
+        model: String? = nil,
+        theme: String? = nil,
+        agentRole: String? = nil,
         prompt: String? = nil,
         message: String? = nil,
         activity: String? = nil,
@@ -810,6 +838,10 @@ public struct BridgeEvent: Codable, Equatable, Sendable {
         self.sourceProcessID = sourceProcessID
         self.cwd = cwd
         self.transcriptPath = transcriptPath
+        self.provider = provider
+        self.model = model
+        self.theme = theme
+        self.agentRole = agentRole
         self.prompt = prompt
         self.message = message
         self.activity = activity

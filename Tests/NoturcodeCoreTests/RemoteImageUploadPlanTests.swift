@@ -200,6 +200,42 @@ final class RemoteImageUploadPlanTests: XCTestCase {
         XCTAssertEqual((attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
 
+    func testRemoteTerminalRegistryKeepsLatestSessionSnapshotUntilWorkspaceCloses() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-remote-session-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let registry = RemoteTerminalRegistry(directoryURL: root)
+        let identity = TerminalIdentity(
+            application: .iterm,
+            nativeSessionID: "w0t0p3:23FB1192-1E94-4C6D-AFD8-958D891E2C3B",
+            remoteHost: "gprc"
+        )
+        let now = Date(timeIntervalSince1970: 1_000)
+        let session = TrackedSession(
+            key: SessionKey(source: .codex, sessionID: "remote-chat"),
+            name: "gprc 2",
+            terminal: TerminalTarget(sessionID: identity.sessionID),
+            sourceProcessID: 42,
+            cwd: "/root/project",
+            state: .working,
+            connectedAt: now,
+            lastPromptAt: now,
+            stateChangedAt: now
+        )
+
+        try registry.register(terminalSessionID: identity.sessionID)
+        try registry.remember(session)
+
+        let restored = try XCTUnwrap(registry.sessions().first)
+        XCTAssertEqual(restored.key, session.key)
+        XCTAssertEqual(restored.name, "gprc 2")
+        XCTAssertEqual(restored.terminal?.identity?.remoteHost, "gprc")
+
+        try registry.forgetSession(session.key)
+        XCTAssertTrue(registry.sessions().isEmpty)
+        XCTAssertEqual(registry.targets().count, 1)
+    }
+
     func testRemoteTerminalRegistryRejectsLocalOrMalformedTargets() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-remote-registry-invalid-\(UUID().uuidString)", isDirectory: true)

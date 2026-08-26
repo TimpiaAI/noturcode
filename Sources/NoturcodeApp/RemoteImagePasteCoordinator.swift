@@ -2,11 +2,27 @@ import AppKit
 import Foundation
 import NoturcodeCore
 
+enum RemoteImagePasteStage: Equatable, Sendable {
+    case preparing
+    case uploading(host: String)
+    case inserting(remotePath: String)
+    case sent(remotePath: String)
+    case failed(message: String)
+
+    var isTerminal: Bool {
+        switch self {
+        case .sent, .failed: true
+        case .preparing, .uploading, .inserting: false
+        }
+    }
+}
+
 private enum RemoteImagePasteError: LocalizedError {
     case sessionMissing
     case notRemote
     case invalidHost
     case imageTooLarge
+    case clipboardUnavailable
     case commandFailed(String)
     case terminalMissing
 
@@ -16,6 +32,7 @@ private enum RemoteImagePasteError: LocalizedError {
         case .notRemote: "Open this SSH workspace again with `nc` to enable direct image paste."
         case .invalidHost: "The saved SSH host is not safe to use. Open the workspace again with `nc`."
         case .imageTooLarge: "The copied image is larger than 20 MB."
+        case .clipboardUnavailable: "No image was found on the Mac clipboard. Copy the image, then press Command-V again."
         case let .commandFailed(message): message
         case .terminalMissing: "Noturcode could not insert the image into this iTerm2 pane."
         }
@@ -73,12 +90,18 @@ private actor RemoteImageUploader {
 final class RemoteImagePasteCoordinator {
     private let uploader = RemoteImageUploader()
     private let terminalSender: ITermPromptSender
+    private let relay: RemoteImageRelayStore
 
-    init(terminalSender: ITermPromptSender) {
+    init(terminalSender: ITermPromptSender, relay: RemoteImageRelayStore) {
         self.terminalSender = terminalSender
+        self.relay = relay
     }
 
-    func handle(request: TerminalImagePasteRequest, sessions: [TrackedSession]) async throws -> Bool {
+    func handle(
+        request: TerminalImagePasteRequest,
+        sessions: [TrackedSession],
+        progress: @MainActor @escaping (RemoteImagePasteStage) -> Void
+    ) async throws -> Bool {
         let matchingSession = sessions.first(where: {
             $0.terminal?.uniqueID == request.terminalSessionID
         })
@@ -90,8 +113,15 @@ final class RemoteImagePasteCoordinator {
         terminal = registeredTerminal
             ?? persistedTerminal
             ?? TerminalTarget(sessionID: request.terminalSessionID)
+        let hasImage = clipboardContainsImage()
+        if hasImage {
+            progress(.preparing)
+            await Task.yield()
+        }
         guard let localURL = try persistClipboardImage() else {
-            guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else { return false }
+            guard let text = NSPasteboard.general.string(forType: .string), !text.isEmpty else {
+                throw RemoteImagePasteError.clipboardUnavailable
+            }
             try await insert(text, into: terminal)
             return true
         }
@@ -102,13 +132,44 @@ final class RemoteImagePasteCoordinator {
         guard let host = terminal.identity?.remoteHost, !host.isEmpty else {
             throw RemoteImagePasteError.notRemote
         }
-        let remotePath = try await uploader.upload(
-            localURL: localURL,
-            host: host,
-            controlPath: terminal.identity?.sshControlPath
-        )
+        progress(.uploading(host: host))
+        let remotePath: String
+        if terminal.identity?.sshControlPath != nil {
+            remotePath = try await uploader.upload(
+                localURL: localURL,
+                host: host,
+                controlPath: terminal.identity?.sshControlPath
+            )
+        } else {
+            remotePath = try await relayImage(
+                localURL: localURL,
+                terminalSessionID: terminal.sessionID
+            )
+        }
+        progress(.inserting(remotePath: remotePath))
         try await insert(remotePath, into: terminal)
+        progress(.sent(remotePath: remotePath))
         return true
+    }
+
+    private func relayImage(localURL: URL, terminalSessionID: String) async throws -> String {
+        let data = try Data(contentsOf: localURL)
+        let identifier = relay.enqueue(
+            terminalSessionID: terminalSessionID,
+            fileName: RemoteImageUploadPlan.fileName(),
+            data: data
+        )
+        defer { relay.remove(identifier) }
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if let result = relay.result(for: identifier) {
+                return try result.get()
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        throw RemoteImagePasteError.commandFailed(
+            "The image bridge in this SSH pane did not respond within 30 seconds."
+        )
     }
 
     private func insert(_ text: String, into terminal: TerminalTarget) async throws {
@@ -151,5 +212,20 @@ final class RemoteImagePasteCoordinator {
         let url = directory.appendingPathComponent("image-\(UUID().uuidString).png")
         try SecureLocalStorage.writePrivate(png, to: url)
         return url
+    }
+
+    private func clipboardContainsImage() -> Bool {
+        let pasteboard = NSPasteboard.general
+        if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+            return true
+        }
+        let imageTypes: Set<NSPasteboard.PasteboardType> = [
+            .png, .tiff,
+            NSPasteboard.PasteboardType("public.jpeg"),
+            NSPasteboard.PasteboardType("public.heic")
+        ]
+        return (pasteboard.pasteboardItems ?? []).contains { item in
+            !imageTypes.isDisjoint(with: item.types)
+        }
     }
 }

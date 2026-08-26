@@ -35,6 +35,13 @@ struct NotchSurfaceView: View {
         return metrics.collapsedHeight(sessionCount: store.sessions.count)
     }
 
+    private var dockHeaderHeight: CGFloat {
+        if state.isExpanded, metrics.hasHardwareNotch {
+            return metrics.neckHeight + 30
+        }
+        return metrics.collapsedHeight(sessionCount: store.sessions.count)
+    }
+
     private var coordinatedContentTransition: AnyTransition {
         guard !reduceMotion else { return .opacity }
         return .asymmetric(
@@ -77,10 +84,6 @@ struct NotchSurfaceView: View {
                     : .spring(response: 0.20, dampingFraction: 1.0)),
             value: state.isExpanded
         )
-        .animation(
-            reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0),
-            value: surfaceHeight
-        )
     }
 
     private var dockHeader: some View {
@@ -93,7 +96,7 @@ struct NotchSurfaceView: View {
         )
         .frame(
             width: surfaceWidth,
-            height: metrics.collapsedHeight(sessionCount: store.sessions.count),
+            height: dockHeaderHeight,
             alignment: .top
         )
     }
@@ -160,6 +163,11 @@ private struct BillGatesQuoteRotator: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var quoteIndex = 0
+    let alignment: Alignment
+
+    init(alignment: Alignment = .leading) {
+        self.alignment = alignment
+    }
 
     var body: some View {
         Text("“\(Self.quotes[quoteIndex])” — Bill Gates")
@@ -169,7 +177,7 @@ private struct BillGatesQuoteRotator: View {
             .truncationMode(.tail)
             .contentTransition(.opacity)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: quoteIndex)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: alignment)
             .accessibilityIdentifier("bill-gates-quote")
             .task {
                 quoteIndex = Int.random(in: Self.quotes.indices)
@@ -326,47 +334,49 @@ private struct AdaptiveDockHeader: View {
     }
 
     private var hardwareNotchHeader: some View {
-        let visibleSessions = Array(sessions.prefix(3))
-        let hiddenSessions = Array(sessions.dropFirst(3))
-        let itemCount = visibleSessions.count + (hiddenSessions.isEmpty ? 0 : 1)
-        let leftCount = itemCount / 2
-        let leftSessions = Array(visibleSessions.prefix(leftCount))
-        let rightSessions = Array(visibleSessions.dropFirst(leftCount))
-        let chipWidth = sessions.map { metrics.sessionChipWidth(for: $0.name) }.max() ?? 50
+        let primarySession = sessions.first
+        let additionalSessions = Array(sessions.dropFirst())
+        let primaryChipWidth = primarySession.map { metrics.sessionChipWidth(for: $0.name) } ?? 62
 
-        return HStack(spacing: 0) {
-            HStack(spacing: 8) {
-                NoturcodeBrandMark(size: 19)
-                Rectangle()
-                    .fill(.white.opacity(0.12))
-                    .frame(width: 1, height: 20)
-                hardwareSessionGroup(leftSessions, overflow: [], chipWidth: chipWidth)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+        return VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    NoturcodeBrandMark(size: 19)
+                    HStack(spacing: 8) {
+                        Rectangle()
+                            .fill(.white.opacity(0.12))
+                            .frame(width: 1, height: 20)
+                        if let primarySession {
+                            sessionChip(primarySession, width: primaryChipWidth)
+                        }
+                    }
+                    .opacity(isExpanded ? 0 : 1)
+                    .animation(compactContentAnimation, value: isExpanded)
+                    .allowsHitTesting(!isExpanded)
+                }
+                .frame(maxWidth: .infinity, alignment: isExpanded ? .leading : .trailing)
 
-            Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
+                Color.clear.frame(width: metrics.neckWidth, height: metrics.neckHeight)
 
-            hardwareSessionGroup(rightSessions, overflow: hiddenSessions, chipWidth: chipWidth)
+                HStack(spacing: 0) {
+                    if !additionalSessions.isEmpty {
+                        overflowChip(sessions: additionalSessions, width: 78)
+                    }
+                }
+                .opacity(isExpanded ? 0 : 1)
+                .animation(compactContentAnimation, value: isExpanded)
+                .allowsHitTesting(!isExpanded)
                 .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.horizontal, 14)
-        .frame(height: metrics.neckHeight)
-    }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: metrics.neckHeight)
 
-    @ViewBuilder
-    private func hardwareSessionGroup(
-        _ values: [TrackedSession],
-        overflow: [TrackedSession],
-        chipWidth: CGFloat
-    ) -> some View {
-        HStack(spacing: 6) {
-            ForEach(values) { session in
-                sessionChip(session, width: chipWidth)
-                    .transition(.opacity.combined(with: .scale(scale: 0.92)))
-            }
-            if !overflow.isEmpty {
-                overflowChip(sessions: overflow, width: chipWidth)
-            }
+            BillGatesQuoteRotator(alignment: .center)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .opacity(isExpanded ? 1 : 0)
+                .animation(quoteContentAnimation, value: isExpanded)
+                .accessibilityHidden(!isExpanded)
         }
     }
 
@@ -397,13 +407,11 @@ private struct AdaptiveDockHeader: View {
         return HStack(spacing: 5) {
             SessionMarble(
                 session: session,
-                size: 20,
+                size: 26,
                 animate: true,
                 completionIsUnread: completionReads.isUnread(session)
             )
-            if let terminal = session.terminal {
-                TerminalAppMark(target: terminal, size: 9)
-            }
+            ProviderMark(source: session.key.source, size: 9)
             Text(session.name)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.92))
@@ -411,7 +419,7 @@ private struct AdaptiveDockHeader: View {
                 .truncationMode(.tail)
         }
         .padding(.horizontal, 7)
-        .frame(width: width, height: 30, alignment: .leading)
+        .frame(width: width, height: 36, alignment: .leading)
         .background(
             Capsule(style: .continuous)
                 .fill(.white.opacity(isPrimary ? 0.075 : 0.035))
@@ -441,7 +449,7 @@ private struct AdaptiveDockHeader: View {
                     name: "More sessions",
                     state: overflowState,
                     source: nil,
-                    size: 20,
+                    size: 26,
                     animate: true,
                     completionIsUnread: completionIsUnread
                 )
@@ -457,7 +465,7 @@ private struct AdaptiveDockHeader: View {
             }
             .foregroundStyle(.white.opacity(0.66))
             .padding(.horizontal, 7)
-            .frame(width: width, height: 30, alignment: .leading)
+            .frame(width: width, height: 36, alignment: .leading)
             .background(
                 Capsule(style: .continuous)
                     .fill(.white.opacity(0.035))
@@ -474,63 +482,69 @@ private struct AdaptiveDockHeader: View {
 }
 
 @MainActor
-private final class TerminalIconCache {
-    static let shared = TerminalIconCache()
-    private var images: [TerminalApplicationKind: NSImage] = [:]
-
-    func image(for kind: TerminalApplicationKind) -> NSImage? {
-        if let image = images[kind] { return image }
-        if let bundleIdentifier = kind.bundleIdentifier,
-           let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleIdentifier) {
-            let image = NSWorkspace.shared.icon(forFile: applicationURL.path)
-            images[kind] = image
-            return image
-        }
-        let path: String
-        switch kind {
-        case .iterm: path = "/Applications/iTerm.app"
-        case .terminal: path = "/System/Applications/Utilities/Terminal.app"
-        case .ghostty: path = "/Applications/Ghostty.app"
-        case .warp: path = "/Applications/Warp.app"
-        case .wezterm: path = "/Applications/WezTerm.app"
-        case .kitty: path = "/Applications/kitty.app"
-        case .unknown: return nil
-        }
-        guard FileManager.default.fileExists(atPath: path) else { return nil }
-        let image = NSWorkspace.shared.icon(forFile: path)
-        images[kind] = image
-        return image
-    }
-}
-
-private struct TerminalAppMark: View {
-    let target: TerminalTarget
-    let size: CGFloat
-
-    var body: some View {
-        Group {
-            if let image = TerminalIconCache.shared.image(for: target.applicationKind) {
-                Image(nsImage: image)
-                    .resizable()
-                    .scaledToFit()
-            } else {
-                Image(systemName: "terminal")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundStyle(.white.opacity(0.56))
-            }
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-        .help(target.applicationKind.displayName)
-    }
+final class AnnouncementHoverState: ObservableObject {
+    @Published var isHovered = false
 }
 
 struct AnnouncementView: View {
     let announcement: AttentionAnnouncement
+    @ObservedObject var hoverState: AnnouncementHoverState
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var accent: Color {
-        announcement.kind == .done ? .green : .orange
+        switch announcement.kind {
+        case .done: .green
+        case .asking: .orange
+        case .remotePaste:
+            switch announcement.remotePasteStage {
+            case .sent: .green
+            case .failed: .red
+            case .preparing, .uploading, .inserting, .none: .cyan
+            }
+        }
+    }
+
+    private var statusText: String {
+        switch announcement.kind {
+        case .done: "Finished — click to open"
+        case .asking: "Needs your attention"
+        case .remotePaste:
+            switch announcement.remotePasteStage {
+            case .preparing: "Preparing image"
+            case let .uploading(host): "Uploading image to \(host)"
+            case .inserting: "Sending image to the session"
+            case .sent: "Image sent"
+            case .failed: "Upload failed"
+            case .none: "Preparing image"
+            }
+        }
+    }
+
+    private var statusSymbol: String {
+        switch announcement.kind {
+        case .done: "checkmark.circle.fill"
+        case .asking: "exclamationmark.circle.fill"
+        case .remotePaste:
+            switch announcement.remotePasteStage {
+            case .sent: "checkmark.circle.fill"
+            case .failed: "xmark.circle.fill"
+            case .preparing, .uploading, .inserting, .none: "arrow.up.circle.fill"
+            }
+        }
+    }
+
+    private var detailText: String? {
+        switch announcement.remotePasteStage {
+        case let .inserting(remotePath), let .sent(remotePath):
+            URL(fileURLWithPath: remotePath).lastPathComponent
+        case let .failed(message): message
+        case .preparing, .uploading, .none: nil
+        }
+    }
+
+    private var isRemotePasteActive: Bool {
+        announcement.kind == .remotePaste && announcement.remotePasteStage?.isTerminal == false
     }
 
     var body: some View {
@@ -548,16 +562,27 @@ struct AnnouncementView: View {
                         .foregroundStyle(.white.opacity(0.97))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Label(
-                        announcement.kind == .done ? "Finished — click to open" : "Needs your attention",
-                        systemImage: announcement.kind == .done ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
-                    )
+                    Label(statusText, systemImage: statusSymbol)
                     .font(.system(size: 10.5, weight: .semibold))
                     .foregroundStyle(accent.opacity(0.90))
+                    if let detailText {
+                        Text(detailText)
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.48))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
                 }
                 Spacer(minLength: 0)
-                AnnouncementProgressRing(announcement: announcement)
-                .frame(width: 17, height: 17)
+                if isRemotePasteActive {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(accent)
+                        .frame(width: 17, height: 17)
+                } else {
+                    AnnouncementProgressRing(announcement: announcement)
+                        .frame(width: 17, height: 17)
+                }
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 15)
@@ -573,11 +598,199 @@ struct AnnouncementView: View {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(.white.opacity(0.10), lineWidth: 0.75)
                 }
+                .overlay {
+                    NodaConicGlow(
+                        isActive: hoverState.isHovered,
+                        reduceMotion: reduceMotion,
+                        color: NSColor(red: 0.776, green: 0.910, blue: 0.235, alpha: 1),
+                        cornerRadius: 18
+                    )
+                }
         }
-        .padding(2)
+        .padding(10)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: hoverState.isHovered)
+        .clickableCursor()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(announcement.name), \(announcement.kind.label)")
         .accessibilityHint("Focus this session in iTerm2")
+    }
+}
+
+struct NodaConicGlow: NSViewRepresentable {
+    let isActive: Bool
+    let reduceMotion: Bool
+    let color: NSColor
+    let cornerRadius: CGFloat
+
+    func makeNSView(context: Context) -> NodaConicGlowView {
+        NodaConicGlowView()
+    }
+
+    func updateNSView(_ view: NodaConicGlowView, context: Context) {
+        view.configure(
+            isActive: isActive,
+            reduceMotion: reduceMotion,
+            color: color,
+            cornerRadius: cornerRadius
+        )
+    }
+
+    static func dismantleNSView(_ view: NodaConicGlowView, coordinator: ()) {
+        view.stopAnimating()
+    }
+}
+
+final class NodaConicGlowView: NSView {
+    private let effectLayer = CALayer()
+    private let ringContainer = CALayer()
+    private let haloContainer = CALayer()
+    private let ringGradient = CAGradientLayer()
+    private let haloGradient = CAGradientLayer()
+    private let ringMask = CAShapeLayer()
+    private let haloMask = CAShapeLayer()
+    private var configuredActive: Bool?
+    private var configuredReduceMotion: Bool?
+    private var configuredColor: NSColor?
+    private var configuredCornerRadius: CGFloat = 18
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+
+        layer?.addSublayer(effectLayer)
+        effectLayer.addSublayer(haloContainer)
+        effectLayer.addSublayer(ringContainer)
+
+        configureGradient(ringGradient)
+        configureGradient(haloGradient)
+        ringContainer.addSublayer(ringGradient)
+        haloContainer.addSublayer(haloGradient)
+
+        configureMask(ringMask, lineWidth: 1.5)
+        configureMask(haloMask, lineWidth: 4.8)
+        ringContainer.mask = ringMask
+        haloContainer.mask = haloMask
+        haloContainer.opacity = 0.23
+        effectLayer.opacity = 0
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effectLayer.frame = bounds
+        ringContainer.frame = bounds
+        haloContainer.frame = bounds
+        updateMask(ringMask, lineWidth: 1.5, cornerRadius: configuredCornerRadius)
+        updateMask(haloMask, lineWidth: 4.8, cornerRadius: configuredCornerRadius)
+
+        let side = max(bounds.width, bounds.height) * 2.4
+        let gradientFrame = CGRect(
+            x: bounds.midX - side / 2,
+            y: bounds.midY - side / 2,
+            width: side,
+            height: side
+        )
+        ringGradient.frame = gradientFrame
+        haloGradient.frame = gradientFrame
+        CATransaction.commit()
+    }
+
+    func configure(isActive: Bool, reduceMotion: Bool, color: NSColor, cornerRadius: CGFloat) {
+        let colorChanged = configuredColor?.isEqual(color) != true
+        let radiusChanged = configuredCornerRadius != cornerRadius
+        guard configuredActive != isActive || configuredReduceMotion != reduceMotion || colorChanged || radiusChanged else { return }
+        configuredActive = isActive
+        configuredReduceMotion = reduceMotion
+        configuredColor = color
+        configuredCornerRadius = cornerRadius
+        if colorChanged {
+            let colors = gradientColors(for: color)
+            ringGradient.colors = colors
+            haloGradient.colors = colors
+        }
+        if radiusChanged {
+            needsLayout = true
+        }
+        setVisible(isActive, animated: !reduceMotion)
+        reduceMotion ? stopAnimating() : startAnimating()
+    }
+
+    private func configureGradient(_ gradient: CAGradientLayer) {
+        gradient.type = .conic
+        gradient.locations = [0.00, 0.19, 0.39, 0.61, 0.83, 1.00]
+        gradient.startPoint = CGPoint(x: 0.5, y: 0.5)
+        gradient.endPoint = CGPoint(x: 0.5, y: 0.0)
+    }
+
+    private func gradientColors(for color: NSColor) -> [CGColor] {
+        [
+            NSColor.clear.cgColor,
+            color.withAlphaComponent(0.60).cgColor,
+            NSColor.white.withAlphaComponent(0.04).cgColor,
+            NSColor.black.withAlphaComponent(0.55).cgColor,
+            NSColor.white.withAlphaComponent(0.04).cgColor,
+            NSColor.clear.cgColor,
+        ]
+    }
+
+    private func configureMask(_ mask: CAShapeLayer, lineWidth: CGFloat) {
+        mask.fillColor = NSColor.clear.cgColor
+        mask.strokeColor = NSColor.white.cgColor
+        mask.lineWidth = lineWidth
+    }
+
+    private func updateMask(_ mask: CAShapeLayer, lineWidth: CGFloat, cornerRadius: CGFloat) {
+        mask.frame = bounds
+        mask.path = CGPath(
+            roundedRect: bounds.insetBy(dx: lineWidth / 2, dy: lineWidth / 2),
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+    }
+
+    private func setVisible(_ visible: Bool, animated: Bool) {
+        let target: Float = visible ? 1 : 0
+        let current = effectLayer.presentation()?.opacity ?? effectLayer.opacity
+        effectLayer.removeAnimation(forKey: "noturcode.noda-glow-fade")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effectLayer.opacity = target
+        CATransaction.commit()
+        guard animated, current != target else { return }
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = current
+        fade.toValue = target
+        fade.duration = 0.45
+        fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        effectLayer.add(fade, forKey: "noturcode.noda-glow-fade")
+    }
+
+    private func startAnimating() {
+        guard ringGradient.animation(forKey: "noturcode.noda-glow-spin") == nil else { return }
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = 0
+        rotation.toValue = Double.pi * 2
+        rotation.duration = 5
+        rotation.repeatCount = .infinity
+        rotation.timingFunction = CAMediaTimingFunction(name: .linear)
+        rotation.isRemovedOnCompletion = false
+        ringGradient.add(rotation, forKey: "noturcode.noda-glow-spin")
+        haloGradient.add(rotation.copy() as! CAAnimation, forKey: "noturcode.noda-glow-spin")
+    }
+
+    func stopAnimating() {
+        ringGradient.removeAnimation(forKey: "noturcode.noda-glow-spin")
+        haloGradient.removeAnimation(forKey: "noturcode.noda-glow-spin")
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ringGradient.transform = CATransform3DIdentity
+        haloGradient.transform = CATransform3DIdentity
+        CATransaction.commit()
     }
 }
 

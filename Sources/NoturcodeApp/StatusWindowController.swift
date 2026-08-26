@@ -92,6 +92,9 @@ private struct StatusOverviewView: View {
         return sessions.filter {
             $0.name.localizedCaseInsensitiveContains(searchText)
                 || $0.key.source.displayName.localizedCaseInsensitiveContains(searchText)
+                || ($0.provider?.localizedCaseInsensitiveContains(searchText) ?? false)
+                || ($0.model?.localizedCaseInsensitiveContains(searchText) ?? false)
+                || ($0.agentRole?.localizedCaseInsensitiveContains(searchText) ?? false)
                 || ($0.cwd?.localizedCaseInsensitiveContains(searchText) ?? false)
         }
     }
@@ -159,6 +162,9 @@ private struct StatusOverviewView: View {
                     Button("Start Grok") { model.createNativeSession(provider: .grok) }
                     Divider()
                     Button("Connect OpenCode") { model.connectOpenCodeServer() }
+                    Divider()
+                    Button("Save iTerm Layout") { model.saveITermWorkspace() }
+                    Button("Relaunch iTerm Layout") { model.restoreITermWorkspace() }
                 } label: {
                     Image(systemName: "square.and.pencil")
                         .font(.system(size: 11, weight: .semibold))
@@ -273,6 +279,11 @@ private struct StatusOverviewView: View {
         }
         .buttonStyle(.plain)
         .clickableCursor()
+        .contextMenu {
+            Button("Rename session…") { model.promptToRename(session) }
+            Divider()
+            Button("Disconnect from Noturcode") { model.disconnectFromNoturcode(session) }
+        }
         .foregroundStyle(.white.opacity(selected ? 0.94 : 0.72))
         .accessibilityIdentifier("desktop-session-row")
     }
@@ -318,6 +329,11 @@ private struct StatusOverviewView: View {
                     Text(session.key.source.displayName)
                         .font(.system(size: 9.5, weight: .medium))
                         .foregroundStyle(.white.opacity(0.34))
+                    if let model = session.model {
+                        Text(model)
+                            .font(.system(size: 9, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.cyan.opacity(0.48))
+                    }
                 }
                 Text(session.cwd ?? "Location not reported")
                     .font(.system(size: 9, weight: .regular, design: .monospaced))

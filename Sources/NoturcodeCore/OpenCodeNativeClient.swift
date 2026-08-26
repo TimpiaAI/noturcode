@@ -296,20 +296,35 @@ public struct OpenCodePermissionRequest: Equatable, Sendable {
 
 public struct OpenCodeReconciliation: Equatable, Sendable {
     public let sessions: [OpenCodeSession]
+    public let subagents: [OpenCodeSession]
     public let statuses: [String: OpenCodeSessionStatus]
     public let messages: [String: [ChatTranscriptEntry]]
     public let permissions: [OpenCodePermissionRequest]
 
     public init(
         sessions: [OpenCodeSession],
+        subagents: [OpenCodeSession] = [],
         statuses: [String: OpenCodeSessionStatus],
         messages: [String: [ChatTranscriptEntry]],
         permissions: [OpenCodePermissionRequest] = []
     ) {
         self.sessions = sessions
+        self.subagents = subagents
         self.statuses = statuses
         self.messages = messages
         self.permissions = permissions
+    }
+}
+
+public struct OpenCodeEventSessionContext: Equatable, Sendable {
+    public let type: String
+    public let sessionID: String
+    public let parentID: String?
+
+    public init(type: String, sessionID: String, parentID: String?) {
+        self.type = type
+        self.sessionID = sessionID
+        self.parentID = parentID
     }
 }
 
@@ -318,21 +333,39 @@ public enum OpenCodeNativeEventMapper {
         for event: OpenCodeSSEEvent,
         now: Date = Date(),
         sessionScope: Set<String> = [],
-        nativeEndpoint: String? = nil
+        nativeEndpoint: String? = nil,
+        knownParentID: String? = nil
     ) -> [BridgeEvent] {
         guard let envelope = jsonObject(from: event.data),
               let (type, object) = eventTypeAndPayload(event: event, envelope: envelope),
-              let sessionID = sessionID(from: object),
-              sessionScope.isEmpty || sessionScope.contains(sessionID)
+              let sessionID = sessionID(from: object)
         else {
             return []
         }
 
         let info = object["info"] as? [String: Any]
+        let parentID = knownParentID
+            ?? string(object["parentID"])
+            ?? string(object["parentId"])
+            ?? string(object["parent_id"])
+            ?? string(info?["parentID"])
+            ?? string(info?["parentId"])
+            ?? string(info?["parent_id"])
+        guard sessionScope.isEmpty || sessionScope.contains(parentID ?? sessionID) else { return [] }
         let sessionName = string(object["title"])
             ?? string(object["name"])
             ?? string(info?["title"])
         let directory = string(object["directory"]) ?? string(info?["directory"])
+        if let parentID {
+            return childBridgeEvents(
+                type: type,
+                childSessionID: sessionID,
+                parentSessionID: parentID,
+                object: object,
+                now: now,
+                name: sessionName
+            )
+        }
 
         switch type {
         case "session.created", "session.updated":
@@ -360,7 +393,7 @@ public enum OpenCodeNativeEventMapper {
             )]
         case "session.idle":
             return [BridgeEvent(
-                kind: .responseCompleted,
+                kind: .turnInterrupted,
                 source: .opencode,
                 sessionID: sessionID,
                 timestamp: now,
@@ -386,6 +419,35 @@ public enum OpenCodeNativeEventMapper {
                 name: sessionName,
                 directory: directory
             )
+        case "session.next.model.switched", "message.updated":
+            let modelObject = (object["model"] as? [String: Any])
+                ?? (info?["model"] as? [String: Any])
+            let provider = string(modelObject?["providerID"])
+                ?? string(object["providerID"])
+                ?? string(info?["providerID"])
+            let model = string(modelObject?["modelID"])
+                ?? string(object["modelID"])
+                ?? string(info?["modelID"])
+            let agent = string(object["agent"]) ?? string(info?["agent"])
+            guard provider != nil || model != nil || agent != nil else { return [] }
+            return [BridgeEvent(
+                kind: .metadataUpdated,
+                source: .opencode,
+                sessionID: sessionID,
+                timestamp: now,
+                provider: provider,
+                model: model,
+                agentRole: agent
+            )]
+        case "session.next.agent.switched":
+            guard let agent = string(object["agent"]) ?? string(info?["agent"]) else { return [] }
+            return [BridgeEvent(
+                kind: .metadataUpdated,
+                source: .opencode,
+                sessionID: sessionID,
+                timestamp: now,
+                agentRole: agent
+            )]
         case "permission.updated":
             return [BridgeEvent(
                 kind: .askingYou,
@@ -407,6 +469,75 @@ public enum OpenCodeNativeEventMapper {
         default:
             return []
         }
+    }
+
+    public static func sessionContext(from event: OpenCodeSSEEvent) -> OpenCodeEventSessionContext? {
+        guard let envelope = jsonObject(from: event.data),
+              let (type, object) = eventTypeAndPayload(event: event, envelope: envelope),
+              let sessionID = sessionID(from: object) else { return nil }
+        let info = object["info"] as? [String: Any]
+        let parentID = string(object["parentID"])
+            ?? string(object["parentId"])
+            ?? string(object["parent_id"])
+            ?? string(info?["parentID"])
+            ?? string(info?["parentId"])
+            ?? string(info?["parent_id"])
+        return OpenCodeEventSessionContext(type: type, sessionID: sessionID, parentID: parentID)
+    }
+
+    private static func childBridgeEvents(
+        type: String,
+        childSessionID: String,
+        parentSessionID: String,
+        object: [String: Any],
+        now: Date,
+        name: String?
+    ) -> [BridgeEvent] {
+        let agentType = name
+            ?? string(object["agent"])
+            ?? string((object["info"] as? [String: Any])?["agent"])
+            ?? "OpenCode agent"
+        let status = (object["status"] as? [String: Any]) ?? object
+        let state = string(status["type"]) ?? string(status["status"])
+        let kind: BridgeEventKind
+        let activity: String?
+        switch type {
+        case "session.created":
+            kind = .subagentStarted
+            activity = "starting"
+        case "session.updated", "message.part.updated":
+            kind = .subagentActivity
+            activity = string((object["part"] as? [String: Any])?["tool"]) ?? "working"
+        case "session.idle", "session.deleted":
+            kind = .subagentCompleted
+            activity = nil
+        case "session.error":
+            kind = .subagentFailed
+            activity = nil
+        case "session.status":
+            if state == "idle" || state == "done" || state == "completed" {
+                kind = .subagentCompleted
+                activity = nil
+            } else {
+                kind = .subagentActivity
+                activity = string(status["message"]) ?? state ?? "working"
+            }
+        default:
+            return []
+        }
+        return [BridgeEvent(
+            kind: kind,
+            source: .opencode,
+            sessionID: parentSessionID,
+            timestamp: now,
+            message: kind == .subagentCompleted ? string(object["message"]) : nil,
+            activity: activity,
+            error: kind == .subagentFailed
+                ? string(object["error"]) ?? string(object["message"]) ?? "OpenCode agent failed"
+                : nil,
+            subagentID: childSessionID,
+            subagentType: agentType
+        )]
     }
 
     public static func permissionRequest(
@@ -519,7 +650,7 @@ public enum OpenCodeNativeEventMapper {
             )]
         case "idle":
             return [BridgeEvent(
-                kind: .responseCompleted,
+                kind: .turnInterrupted,
                 source: .opencode,
                 sessionID: sessionID,
                 timestamp: now,
@@ -576,7 +707,7 @@ public enum OpenCodeNativeEventMapper {
             return sessionID
         }
         if let info = object["info"] as? [String: Any] {
-            return string(info["id"]) ?? string(info["sessionID"])
+            return string(info["sessionID"]) ?? string(info["id"])
         }
         if let part = object["part"] as? [String: Any] {
             return string(part["sessionID"])
@@ -635,6 +766,12 @@ public enum OpenCodeNativeEventMapper {
         return Date(timeIntervalSince1970: seconds)
     }
 
+    fileprivate static func qualifiedModel(provider: String?, model: String?) -> String? {
+        guard let model, !model.isEmpty else { return nil }
+        guard let provider, !provider.isEmpty, !model.hasPrefix(provider + "/") else { return model }
+        return "\(provider)/\(model)"
+    }
+
     fileprivate static func prettyJSON(_ value: Any?) -> String? {
         guard let value else { return nil }
         guard JSONSerialization.isValidJSONObject(value),
@@ -662,6 +799,7 @@ public actor OpenCodeNativeClient {
     private var streamTask: Task<Void, Never>?
     private var lastEventID: String?
     private var watchedSessionIDs: Set<String> = []
+    private var childParentIDs: [String: String] = [:]
 
     public init(
         configuration: OpenCodeServerConfiguration,
@@ -696,6 +834,7 @@ public actor OpenCodeNativeClient {
     public func stop() {
         streamTask?.cancel()
         streamTask = nil
+        childParentIDs.removeAll()
     }
 
     @discardableResult
@@ -703,10 +842,32 @@ public actor OpenCodeNativeClient {
         let sessions = try await fetchSessions()
         let allStatuses = try await fetchStatuses()
         let selectedSessions = sessions.filter {
-            watchedSessionIDs.isEmpty || watchedSessionIDs.contains($0.id)
+            $0.parentID == nil && (watchedSessionIDs.isEmpty || watchedSessionIDs.contains($0.id))
         }
         let selectedIDs = Set(selectedSessions.map(\.id))
-        let statuses = allStatuses.filter { selectedIDs.contains($0.key) }
+        var roots = Dictionary(uniqueKeysWithValues: selectedIDs.map { ($0, $0) })
+        var selectedSubagents: [OpenCodeSession] = []
+        var remaining = sessions.filter { $0.parentID != nil }
+        while !remaining.isEmpty {
+            var unresolved: [OpenCodeSession] = []
+            var foundChild = false
+            for child in remaining {
+                guard let parentID = child.parentID, let rootID = roots[parentID] else {
+                    unresolved.append(child)
+                    continue
+                }
+                roots[child.id] = rootID
+                selectedSubagents.append(child)
+                foundChild = true
+            }
+            guard foundChild else { break }
+            remaining = unresolved
+        }
+        childParentIDs = Dictionary(uniqueKeysWithValues: selectedSubagents.compactMap { child in
+            roots[child.id].map { (child.id, $0) }
+        })
+        let trackedIDs = selectedIDs.union(selectedSubagents.map(\.id))
+        let statuses = allStatuses.filter { trackedIDs.contains($0.key) }
 
         var messages: [String: [ChatTranscriptEntry]] = [:]
         for session in selectedSessions {
@@ -714,10 +875,11 @@ public actor OpenCodeNativeClient {
         }
 
         let permissions = try await fetchPermissions().filter {
-            selectedIDs.isEmpty || selectedIDs.contains($0.sessionID)
+            selectedIDs.contains($0.sessionID)
         }
         let snapshot = OpenCodeReconciliation(
             sessions: selectedSessions,
+            subagents: selectedSubagents,
             statuses: statuses,
             messages: messages,
             permissions: permissions
@@ -839,22 +1001,33 @@ public actor OpenCodeNativeClient {
             lastEventID = id
         }
 
+        let context = OpenCodeNativeEventMapper.sessionContext(from: event)
+        if let childID = context?.sessionID, let parentID = context?.parentID {
+            childParentIDs[childID] = childParentIDs[parentID] ?? parentID
+        }
+        let knownParentID = context.flatMap { childParentIDs[$0.sessionID] ?? $0.parentID }
         for bridgeEvent in OpenCodeNativeEventMapper.bridgeEvents(
             for: event,
             sessionScope: watchedSessionIDs,
-            nativeEndpoint: configuration.baseURL.absoluteString
+            nativeEndpoint: configuration.baseURL.absoluteString,
+            knownParentID: knownParentID
         ) {
             await eventHandler(bridgeEvent)
         }
 
-        if let chat = OpenCodeNativeEventMapper.chatEntry(from: event),
+        if knownParentID == nil,
+           let chat = OpenCodeNativeEventMapper.chatEntry(from: event),
            watchedSessionIDs.isEmpty || watchedSessionIDs.contains(chat.sessionID) {
             await chatHandler(chat.sessionID, [chat.entry])
         }
 
-        if let permission = OpenCodeNativeEventMapper.permissionRequest(from: event),
+        if knownParentID == nil,
+           let permission = OpenCodeNativeEventMapper.permissionRequest(from: event),
            watchedSessionIDs.isEmpty || watchedSessionIDs.contains(permission.sessionID) {
             await permissionHandler(permission)
+        }
+        if context?.type == "session.deleted", let sessionID = context?.sessionID {
+            childParentIDs[sessionID] = nil
         }
     }
 
@@ -892,7 +1065,7 @@ public actor OpenCodeNativeClient {
                     activity = status.message ?? "retrying"
                     message = nil
                 case .idle:
-                    kind = .responseCompleted
+                    kind = .turnInterrupted
                     activity = nil
                     message = OpenCodeNativeEventMapper.latestAssistantMessage(
                         in: snapshot.messages[session.id] ?? []
@@ -912,6 +1085,32 @@ public actor OpenCodeNativeClient {
                 ))
             }
             await chatHandler(session.id, snapshot.messages[session.id] ?? [])
+        }
+        for child in snapshot.subagents {
+            guard let parentID = childParentIDs[child.id] ?? child.parentID else { continue }
+            let status = snapshot.statuses[child.id]
+            let kind: BridgeEventKind
+            let activity: String?
+            switch status?.state {
+            case .idle:
+                kind = .subagentCompleted
+                activity = nil
+            case .retry:
+                kind = .subagentActivity
+                activity = status?.message ?? "retrying"
+            case .busy, .unknown, nil:
+                kind = .subagentStarted
+                activity = "working"
+            }
+            await eventHandler(BridgeEvent(
+                kind: kind,
+                source: .opencode,
+                sessionID: parentID,
+                timestamp: Date(),
+                activity: activity,
+                subagentID: child.id,
+                subagentType: child.title ?? "OpenCode agent"
+            ))
         }
         for permission in snapshot.permissions {
             await permissionHandler(permission)
@@ -940,7 +1139,9 @@ public actor OpenCodeNativeClient {
                 id: id,
                 title: OpenCodeNativeEventMapper.string(object["title"]),
                 directory: OpenCodeNativeEventMapper.string(object["directory"]),
-                parentID: OpenCodeNativeEventMapper.string(object["parentID"]),
+                parentID: OpenCodeNativeEventMapper.string(object["parentID"])
+                    ?? OpenCodeNativeEventMapper.string(object["parentId"])
+                    ?? OpenCodeNativeEventMapper.string(object["parent_id"]),
                 createdAt: OpenCodeNativeEventMapper.date(from: (object["time"] as? [String: Any])?["created"]),
                 updatedAt: OpenCodeNativeEventMapper.date(from: (object["time"] as? [String: Any])?["updated"])
             )
@@ -1022,7 +1223,9 @@ public actor OpenCodeNativeClient {
             let kind: ChatTranscriptKind = role == "user" ? .user : .assistant
             let messageID = OpenCodeNativeEventMapper.string(info["id"]) ?? UUID().uuidString
             let timestamp = OpenCodeNativeEventMapper.date(from: (info["time"] as? [String: Any])?["created"])
-            let model = OpenCodeNativeEventMapper.string(info["modelID"])
+            let modelID = OpenCodeNativeEventMapper.string(info["modelID"])
+            let providerID = OpenCodeNativeEventMapper.string(info["providerID"])
+            let model = OpenCodeNativeEventMapper.qualifiedModel(provider: providerID, model: modelID)
             let parts = value["parts"] as? [[String: Any]] ?? []
 
             var textParts: [String] = []

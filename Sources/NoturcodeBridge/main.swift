@@ -69,21 +69,7 @@ struct NoturcodeBridgeMain {
             let existingSession = key.flatMap { key in
                 SessionPersistence().load().first(where: { $0.key == key })
             }
-            let wasConnected = existingSession != nil
             let eventName = payload.firstString(for: ["hook_event_name", "hookEventName", "type"]) ?? ""
-            let lastMessage = payload.firstString(for: ["last_assistant_message", "lastAssistantMessage"])
-            let submittedPrompt = payload.firstString(for: ["prompt"])
-            let stopHookActive = payload["stop_hook_active"]?.boolValue ?? false
-            let shouldRequestSummary = wasConnected
-                && eventName.caseInsensitiveCompare("Stop") == .orderedSame
-                && !stopHookActive
-                && !NoturcodeSummaryContract.isCompliant(lastMessage)
-
-            if shouldRequestSummary {
-                writeJSON(["decision": "block", "reason": NoturcodeSummaryContract.instruction])
-                return
-            }
-
             let transcriptPath = payload.firstString(for: ["transcript_path", "transcriptPath"])
             let checkpointStore = TokenUsageCheckpointStore()
             if let key, let transcriptPath,
@@ -111,7 +97,7 @@ struct NoturcodeBridgeMain {
                     }
                 case .codex:
                     sessionTokens = TranscriptTokenCounter.count(source: .codex, path: transcriptPath)
-                case .gemini, .opencode, .grok, .harness:
+                case .gemini, .pi, .omp, .hermes, .opencode, .grok, .harness:
                     sessionTokens = existingSession?.tokens
                 }
                 if let sessionTokens {
@@ -148,15 +134,6 @@ struct NoturcodeBridgeMain {
                         ]
                     ])
                 }
-            } else if wasConnected,
-                      eventName.caseInsensitiveCompare("UserPromptSubmit") == .orderedSame,
-                      NoturcodeSummaryContract.shouldInject(for: submittedPrompt) {
-                writeJSON([
-                    "hookSpecificOutput": [
-                        "hookEventName": "UserPromptSubmit",
-                        "additionalContext": NoturcodeSummaryContract.instruction
-                    ]
-                ])
             } else {
                 writeJSON([:])
             }
@@ -178,6 +155,12 @@ struct NoturcodeBridgeMain {
             writeStandardError("emit requires --source, --session, and --kind\n")
             Foundation.exit(64)
         }
+        if source == .opencode,
+           kind.rawValue == BridgeEventKind.connect.rawValue,
+           isOpenCodeChildSession(sessionID) {
+            writeStandardOutput("ok\n")
+            return
+        }
 
         let event = BridgeEvent(
             kind: kind,
@@ -187,12 +170,18 @@ struct NoturcodeBridgeMain {
             terminalSessionID: option("--terminal", in: arguments) ?? terminalIdentity(),
             sourceProcessID: option("--pid", in: arguments).flatMap(Int32.init),
             cwd: option("--cwd", in: arguments),
+            transcriptPath: option("--transcript", in: arguments),
+            provider: option("--provider", in: arguments),
+            model: option("--model", in: arguments),
+            theme: option("--theme", in: arguments),
+            agentRole: option("--agent-role", in: arguments),
             message: option("--message", in: arguments),
             activity: option("--activity", in: arguments),
             error: option("--error", in: arguments),
             subagentID: option("--subagent", in: arguments),
             subagentType: option("--subagent-type", in: arguments),
-            tokens: option("--tokens", in: arguments).flatMap(Int.init)
+            tokens: option("--tokens", in: arguments).flatMap(Int.init),
+            sessionTokens: option("--session-tokens", in: arguments).flatMap(Int.init)
         )
 
         do {
@@ -237,6 +226,7 @@ struct NoturcodeBridgeMain {
 
     private static func runTerminalID(arguments: [String]) {
         guard let identity = terminalIdentity(
+            nativeSessionID: option("--native-session", in: arguments),
             remoteHost: option("--remote-host", in: arguments),
             sshControlPath: option("--ssh-control-path", in: arguments)
         ), !identity.isEmpty else {
@@ -374,10 +364,15 @@ struct NoturcodeBridgeMain {
     }
 
     private static func terminalIdentity(
+        nativeSessionID: String? = nil,
         remoteHost: String? = nil,
         sshControlPath: String? = nil
     ) -> String? {
         var environment = ProcessInfo.processInfo.environment
+        if let nativeSessionID, !nativeSessionID.isEmpty {
+            environment["TERM_PROGRAM"] = "iTerm.app"
+            environment["TERM_SESSION_ID"] = nativeSessionID
+        }
         if let remoteHost, !remoteHost.isEmpty {
             environment["NOTURCODE_REMOTE_HOST"] = remoteHost
         }
@@ -395,6 +390,36 @@ struct NoturcodeBridgeMain {
     private static func option(_ name: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: name), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+    }
+
+    private static func isOpenCodeChildSession(_ sessionID: String) -> Bool {
+        guard sessionID.range(of: #"^ses_[A-Za-z0-9]+$"#, options: .regularExpression) != nil else {
+            return false
+        }
+        let database = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".local/share/opencode/opencode.db")
+        guard FileManager.default.fileExists(atPath: database.path) else { return false }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = [
+            "-readonly",
+            "-noheader",
+            database.path,
+            "SELECT parent_id FROM session WHERE id = '\(sessionID)' AND parent_id IS NOT NULL LIMIT 1;"
+        ]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+                && !String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        } catch {
+            return false
+        }
     }
 
     private static func writeJSON(_ object: [String: Any]) {

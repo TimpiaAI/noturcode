@@ -24,7 +24,15 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO \
   build >/tmp/noturcode-install-build.log
 
-codesign --force --deep --sign - --entitlements "$repo_dir/Resources/Noturcode.entitlements" "$app_source"
+local_signing_identity=${NOTURCODE_LOCAL_SIGNING_IDENTITY:-}
+if [[ -z "$local_signing_identity" ]]; then
+  local_signing_identity=$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Apple Development:[^"]*\)".*/\1/p' \
+    | head -1)
+fi
+local_signing_identity=${local_signing_identity:--}
+codesign --force --deep --sign "$local_signing_identity" \
+  --entitlements "$repo_dir/Resources/Noturcode.entitlements" "$app_source"
 codesign --verify --deep --strict "$app_source"
 
 osascript -e 'tell application id "ro.noturcode.app" to quit' 2>/dev/null || true
@@ -70,15 +78,19 @@ open -g "$app_destination" --args --background
 # Reload only the small Noturcode provider. Never restart iTerm2 or its sessions.
 # AutoLaunch keeps the provider available on later iTerm2 launches.
 if [[ -x /Applications/iTerm.app/Contents/Resources/it2run ]] \
-  && pgrep -x iTerm2 >/dev/null; then
+  && /bin/ps -axo command= | /usr/bin/awk \
+    '$1 == "/Applications/iTerm.app/Contents/MacOS/iTerm2" { found = 1 } END { exit !found }'; then
   provider_pids=(${(f)"$(pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' 2>/dev/null || true)"})
-  if (( ${#provider_pids} > 0 )); then
-    kill -- $provider_pids 2>/dev/null || true
-    for _ in {1..20}; do
-      pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' >/dev/null || break
-      sleep 0.05
-    done
-  fi
+  for provider_pid in $provider_pids; do
+    provider_command=$(/bin/ps -p "$provider_pid" -o command= 2>/dev/null || true)
+    if [[ "$provider_command" == *'/Scripts/AutoLaunch/Ask Noturcode.py'* ]]; then
+      /bin/kill "$provider_pid" 2>/dev/null || true
+    fi
+  done
+  for _ in {1..20}; do
+    pgrep -f 'Scripts/AutoLaunch/Ask Noturcode.py' >/dev/null || break
+    sleep 0.05
+  done
   /Applications/iTerm.app/Contents/Resources/it2run "$iterm_script" \
     >/tmp/noturcode-iterm-context-menu.log 2>&1 &
 fi
@@ -90,8 +102,13 @@ done
 
 "$bridge_destination" doctor
 print "installed app: $app_destination"
+if [[ "$local_signing_identity" == "-" ]]; then
+  print "local signing: ad-hoc; Automation permission can reset after each rebuild"
+else
+  print "local signing: stable Apple Development identity"
+fi
 print "installed bridge: $bridge_destination"
-print "interactive remote CLI: source '$HOME/.config/noturcode/shell.zsh' then run nc"
+print "Remote SSH: run nc, then choose Open an SSH workspace"
 if [[ -d "$app_backup_dir" ]]; then
   print "previous app backup: $app_backup_dir"
 fi

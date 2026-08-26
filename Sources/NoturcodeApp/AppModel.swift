@@ -57,7 +57,7 @@ final class AppModel: ObservableObject {
     private struct TranscriptObservation: Sendable {
         let candidate: TranscriptCandidate
         let fingerprint: TranscriptFingerprint
-        let completed: Bool
+        let state: TranscriptTurnState
     }
 
     static let shared = AppModel()
@@ -73,7 +73,11 @@ final class AppModel: ObservableObject {
     let paneHighlight = TerminalPaneHighlightCoordinator()
     let transcriptReader = AgentTranscriptReader()
     let terminalPromptSender = ITermPromptSender()
-    lazy var remoteImagePaste = RemoteImagePasteCoordinator(terminalSender: terminalPromptSender)
+    nonisolated let remoteImageRelay = RemoteImageRelayStore()
+    lazy var remoteImagePaste = RemoteImagePasteCoordinator(
+        terminalSender: terminalPromptSender,
+        relay: remoteImageRelay
+    )
     lazy var nativeSessions = NativeSessionCoordinator { [weak self] event in
         await MainActor.run { self?.receive(event) }
     }
@@ -86,6 +90,7 @@ final class AppModel: ObservableObject {
     let completionReads = CompletionReadStore()
     let selectionQuestions = SelectionQuestionCoordinator()
     nonisolated let remoteBridge = RemoteBridgeProcessor()
+    nonisolated let remoteTerminalRegistry: RemoteTerminalRegistry
 
     private var socketServer: UnixSocketServer?
     private var processMonitor: SessionProcessMonitor?
@@ -97,7 +102,9 @@ final class AppModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
 
     private init() {
-        store = SessionStore()
+        let registry = RemoteTerminalRegistry()
+        remoteTerminalRegistry = registry
+        store = SessionStore(recoveredRemoteSessions: registry.sessions())
         store.transitionHandler = { [weak self] transition in
             self?.handle(transition)
         }
@@ -128,7 +135,8 @@ final class AppModel: ObservableObject {
             }
         }
         for session in store.sessions {
-            if let pid = session.sourceProcessID {
+            if let pid = session.sourceProcessID,
+               Self.shouldWatchProcess(terminalSessionID: session.terminal?.sessionID) {
                 processMonitor?.watch(key: session.key, pid: pid)
                 Task { [weak self] in
                     guard let self,
@@ -139,15 +147,57 @@ final class AppModel: ObservableObject {
         }
 
         let server = UnixSocketServer { [weak self] data in
+            if let request = try? JSONDecoder().decode(RemoteImagePollRequest.self, from: data),
+               request.type == "remoteImagePoll" {
+                guard let self,
+                      self.remoteBridge.pairings.validates(
+                        token: request.token,
+                        deviceID: request.deviceID
+                      ) else {
+                    return Self.encodeRemoteResponse(RemoteImagePollResponse(
+                        ok: false,
+                        error: "This VPS is not paired with Noturcode."
+                    ))
+                }
+                return Self.encodeRemoteResponse(self.remoteImageRelay.poll(request))
+            }
+            if let request = try? JSONDecoder().decode(RemoteImageReadyRequest.self, from: data),
+               request.type == "remoteImageReady" {
+                guard let self,
+                      self.remoteBridge.pairings.validates(
+                        token: request.token,
+                        deviceID: request.deviceID
+                      ),
+                      self.remoteImageRelay.complete(request) else {
+                    return Data("{\"ok\":false}".utf8)
+                }
+                return Data("{\"ok\":true}".utf8)
+            }
             if let request = try? JSONDecoder().decode(TerminalImagePasteRequest.self, from: data),
                request.type == "terminalImagePaste" {
                 Task { @MainActor [weak self] in
                     guard let self else { return }
+                    let pasteSession = store.sessions.first {
+                        $0.terminal?.uniqueID == request.terminalSessionID
+                    }
                     do {
-                        if try await remoteImagePaste.handle(request: request, sessions: store.sessions) {
+                        if try await remoteImagePaste.handle(
+                            request: request,
+                            sessions: store.sessions,
+                            progress: { [weak self] stage in
+                                guard let self, let pasteSession else { return }
+                                announcements.updateRemoteImagePaste(session: pasteSession, stage: stage)
+                            }
+                        ) {
                             sounds.play(.send)
                         }
                     } catch {
+                        if let pasteSession {
+                            announcements.updateRemoteImagePaste(
+                                session: pasteSession,
+                                stage: .failed(message: error.localizedDescription)
+                            )
+                        }
                         showStaleMessage(error.localizedDescription)
                         sounds.play(.failed)
                     }
@@ -380,6 +430,44 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func saveITermWorkspace() {
+        Task { [weak self] in
+            do {
+                let summary = try await ITermWorkspaceRunner.shared.snapshot()
+                await MainActor.run {
+                    self?.sounds.play(.send)
+                    self?.showStaleMessage(
+                        "Saved iTerm layout: \(summary.panes) panes in \(summary.windows) windows."
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    self?.sounds.play(.failed)
+                    self?.showStaleMessage(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    func restoreITermWorkspace() {
+        Task { [weak self] in
+            do {
+                let summary = try await ITermWorkspaceRunner.shared.restore()
+                await MainActor.run {
+                    self?.sounds.play(.send)
+                    self?.showStaleMessage(
+                        "Relaunched iTerm layout: \(summary.panes) panes in \(summary.windows) windows."
+                    )
+                }
+            } catch {
+                await MainActor.run {
+                    self?.sounds.play(.failed)
+                    self?.showStaleMessage(error.localizedDescription)
+                }
+            }
+        }
+    }
+
     func showTerminalWindow(for session: TrackedSession) {
         completionReads.markSeen(session)
         displayCoordinator?.dismissAll()
@@ -397,11 +485,37 @@ final class AppModel: ObservableObject {
         displayCoordinator?.sessionStateDidChange()
     }
 
+    func promptToRename(_ session: TrackedSession) {
+        let field = NSTextField(string: session.name)
+        field.placeholderString = "Session name"
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "Rename session"
+        alert.informativeText = "Choose a name for this \(session.key.source.displayName) session."
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        _ = store.rename(session.key, to: field.stringValue)
+    }
+
     private func receive(_ event: BridgeEvent) {
         let transition = store.apply(event)
         switch event.kind {
+        case .disconnect, .sessionEnded:
+            try? remoteTerminalRegistry.forgetSession(event.key)
+        default:
+            if let session = store.sessions.first(where: { $0.key == event.key }) {
+                try? remoteTerminalRegistry.remember(session)
+            }
+        }
+        switch event.kind {
         case .connect, .sessionStarted:
-            if let pid = event.sourceProcessID {
+            if let pid = event.sourceProcessID,
+               Self.shouldWatchProcess(terminalSessionID: event.terminalSessionID) {
                 processMonitor?.watch(key: event.key, pid: pid)
                 Task { [weak self] in
                     guard let self,
@@ -419,6 +533,14 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private static func shouldWatchProcess(terminalSessionID: String?) -> Bool {
+        guard let terminalSessionID,
+              let identity = TerminalIdentity.parse(sessionID: terminalSessionID) else { return true }
+        return identity.remoteHost == nil
+            && identity.sshTTY == nil
+            && identity.sshConnection == nil
+    }
+
     private func startTranscriptReconciliation() {
         transcriptReconciliationTask?.cancel()
         transcriptReconciliationTask = Task { [weak self] in
@@ -431,7 +553,8 @@ final class AppModel: ObservableObject {
                 guard let self else { return }
                 let candidates = self.store.sessions.compactMap { session -> TranscriptCandidate? in
                     guard session.state == .working,
-                          session.key.source == .claude,
+                          (session.key.source == .claude || session.key.source == .codex
+                           || session.key.source == .pi || session.key.source == .omp),
                           let path = session.transcriptPath else { return nil }
                     return TranscriptCandidate(
                         key: session.key,
@@ -456,7 +579,7 @@ final class AppModel: ObservableObject {
                         return TranscriptObservation(
                             candidate: candidate,
                             fingerprint: fingerprint,
-                            completed: TranscriptRunStateDetector.turnCompleted(
+                            state: TranscriptRunStateDetector.turnState(
                                 atPath: candidate.path,
                                 source: candidate.source,
                                 after: candidate.lastPromptAt
@@ -467,15 +590,25 @@ final class AppModel: ObservableObject {
                 for observation in observations {
                     let candidate = observation.candidate
                     self.transcriptFingerprints[candidate.key] = observation.fingerprint
-                    guard observation.completed else { continue }
                     guard let current = self.store.sessions.first(where: { $0.key == candidate.key }),
                           current.state == .working,
                           current.lastPromptAt == candidate.lastPromptAt else { continue }
-                    self.receive(BridgeEvent(
-                        kind: .responseCompleted,
-                        source: candidate.key.source,
-                        sessionID: candidate.key.sessionID
-                    ))
+                    switch observation.state {
+                    case .active:
+                        continue
+                    case .completed:
+                        self.receive(BridgeEvent(
+                            kind: .responseCompleted,
+                            source: candidate.key.source,
+                            sessionID: candidate.key.sessionID
+                        ))
+                    case .interrupted:
+                        self.receive(BridgeEvent(
+                            kind: .turnInterrupted,
+                            source: candidate.key.source,
+                            sessionID: candidate.key.sessionID
+                        ))
+                    }
                 }
             }
         }
@@ -491,7 +624,10 @@ final class AppModel: ObservableObject {
             askingEscalations[key] = nil
         }
 
-        guard let session = transition.new else { return }
+        guard let session = transition.new else {
+            announcements.dismiss(sessionKey: key)
+            return
+        }
         let oldState = transition.old?.state
         if transition.old == nil, transition.event.kind == .connect {
             sounds.play(.connect)

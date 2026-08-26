@@ -25,7 +25,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>15.0</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>Noturcode uses iTerm2's public scripting interface to show connected pane text, navigate when you click, and send only prompts you explicitly submit.</string>
+	<string>Noturcode uses public scripting interfaces to navigate to the iTerm2 pane or browser tab that you explicitly select.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

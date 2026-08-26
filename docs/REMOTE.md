@@ -43,6 +43,20 @@ Run `nc` again and choose `Open an SSH workspace`.
 
 The command opens a normal interactive SSH shell. It also creates a unique Unix-socket forward for that shell and exports the exact local terminal identity. Start Claude, Codex, or Gemini inside it. Use `/nc NAME` inside the coding agent as usual.
 
+### Connect an SSH pane that is already open
+
+Right-click inside the iTerm2 pane. Choose **Connect Session to Noturcode**.
+Noturcode uses OpenSSH's live forwarding command on that same connection. It does
+not start a second SSH login. You do not run `nc ssh` or a connect command.
+
+The remote helper and hooks are a one-time server install. After that install, the
+right-click action can attach each new SSH pane. The one-time pair token is created
+through the live tunnel when required.
+
+Noturcode enables `EnableEscapeCommandline yes` in a small included SSH config.
+This setting applies when OpenSSH starts. Reconnect panes that were already open
+when Noturcode added the setting. Use the action when the agent input is empty.
+
 ### Paste a Mac image into remote Codex or Claude Code
 
 Copy an image on the Mac. Focus the agent input in the iTerm2 SSH workspace. Press `Command-V`.
@@ -50,9 +64,9 @@ Noturcode writes a private PNG, copies it to `~/.cache/noturcode/attachments/` o
 pastes the remote path as an image attachment. It does not press Enter. Write the prompt, then
 submit it yourself. Text paste stays native and unchanged.
 
-The current `nc ssh` command makes the open workspace a private OpenSSH connection-sharing master.
-Image upload reuses that authenticated connection. Key, SSH-agent, and password-authenticated
-workspaces do not need a second login. Reopen a workspace once if an older `nc` version created it.
+The `nc ssh` path reuses its OpenSSH control connection. The right-click path uses a
+remote image relay through the live Unix-socket forward. Key, SSH-agent, and
+password-authenticated SSH panes do not need a second login.
 Images are limited to 20 MB. The remote directory uses mode `0700`; each image uses mode `0600`.
 Noturcode stops an upload after 30 seconds. It refuses stale or non-Noturcode SSH control sockets.
 
@@ -87,4 +101,6 @@ VPS:
 
 ## Current boundary
 
-The paired transport carries lifecycle and tool hook payloads. It does not copy a full remote JSONL transcript yet. Exact return uses the local terminal identity captured by `nc ssh`; sessions started through a separate SSH command do not have that identity.
+The paired transport carries lifecycle and tool hook payloads. It does not copy a
+full remote JSONL transcript yet. Exact return uses the iTerm2 pane ID captured by
+`nc ssh` or by **Connect Session to Noturcode**.

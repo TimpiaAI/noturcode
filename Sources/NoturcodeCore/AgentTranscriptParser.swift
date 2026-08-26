@@ -40,6 +40,9 @@ public struct ChatTranscriptEntry: Identifiable, Equatable, Sendable {
 
 public enum AgentTranscriptParser {
     public static func parse(data: Data, source: AgentSource, limit: Int = 80) -> [ChatTranscriptEntry] {
+        if source == .pi || source == .omp {
+            return PiFamilyTranscriptParser.parse(data: data, limit: limit).entries
+        }
         let text = String(decoding: data, as: UTF8.self)
         var entries: [ChatTranscriptEntry] = []
         var toolIndexes: [String: Int] = [:]
@@ -65,7 +68,7 @@ public enum AgentTranscriptParser {
                     entries: &entries,
                     toolIndexes: &toolIndexes
                 )
-            case .gemini, .opencode, .grok, .harness:
+            case .gemini, .pi, .omp, .hermes, .opencode, .grok, .harness:
                 break
             }
         }

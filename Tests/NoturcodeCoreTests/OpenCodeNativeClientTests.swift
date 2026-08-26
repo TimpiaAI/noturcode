@@ -5,6 +5,7 @@ import XCTest
 private final class OpenCodeStubURLProtocol: URLProtocol {
     nonisolated(unsafe) static var requests: [URLRequest] = []
     nonisolated(unsafe) static var requestBodies: [Data?] = []
+    nonisolated(unsafe) static var responseBodies: [String: Data] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool {
         request.url?.host == "localhost"
@@ -28,7 +29,7 @@ private final class OpenCodeStubURLProtocol: URLProtocol {
             headerFields: ["Content-Type": "application/json"]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocol(self, didLoad: Self.responseBodies[url.path] ?? Data())
         client?.urlProtocolDidFinishLoading(self)
     }
 
@@ -49,6 +50,14 @@ private final class OpenCodeStubURLProtocol: URLProtocol {
             data.append(contentsOf: buffer.prefix(count))
         }
         return data
+    }
+}
+
+private actor OpenCodeEventRecorder {
+    private(set) var values: [BridgeEvent] = []
+
+    func append(_ event: BridgeEvent) {
+        values.append(event)
     }
 }
 
@@ -145,6 +154,39 @@ final class OpenCodeNativeClientTests: XCTestCase {
         XCTAssertEqual(mapped.first?.activity, "working")
     }
 
+    func testMapperKeepsOpenCodeModelAndAgentSeparateFromHarnessIdentity() {
+        let modelEvent = OpenCodeSSEEvent(
+            event: "message",
+            data: #"{"type":"session.next.model.switched","properties":{"sessionID":"ses_local","model":{"providerID":"openai","modelID":"gpt-5.6-sol"}}}"#
+        )
+        let agentEvent = OpenCodeSSEEvent(
+            event: "message",
+            data: #"{"type":"session.next.agent.switched","properties":{"sessionID":"ses_local","agent":"build"}}"#
+        )
+
+        let model = OpenCodeNativeEventMapper.bridgeEvents(for: modelEvent).first
+        let agent = OpenCodeNativeEventMapper.bridgeEvents(for: agentEvent).first
+
+        XCTAssertEqual(model?.kind, .metadataUpdated)
+        XCTAssertEqual(model?.source, .opencode)
+        XCTAssertEqual(model?.provider, "openai")
+        XCTAssertEqual(model?.model, "gpt-5.6-sol")
+        XCTAssertEqual(agent?.agentRole, "build")
+    }
+
+    func testMapperKeepsOpenCodeIdleConnectedInsteadOfMarkingItDone() {
+        let event = OpenCodeSSEEvent(
+            event: "message",
+            data: """
+            {"type":"session.idle","properties":{"sessionID":"ses_local"}}
+            """
+        )
+
+        let mapped = OpenCodeNativeEventMapper.bridgeEvents(for: event)
+
+        XCTAssertEqual(mapped.first?.kind, .turnInterrupted)
+    }
+
     func testMapperConnectsNewSessionWithNativeOpenCodeIdentity() {
         let event = OpenCodeSSEEvent(
             event: "message",
@@ -165,6 +207,64 @@ final class OpenCodeNativeClientTests: XCTestCase {
         XCTAssertEqual(mapped.first?.nativeSession?.endpoint, "http://localhost:4096")
         XCTAssertEqual(mapped.first?.name, "Native task")
         XCTAssertEqual(mapped.first?.cwd, "/tmp/workspace")
+    }
+
+    func testMapperAttachesOpenCodeSubagentToItsParentWithoutCreatingACard() {
+        let event = OpenCodeSSEEvent(
+            event: "message",
+            data: """
+            {"type":"session.created","properties":{
+              "info":{
+                "id":"ses_child",
+                "parentID":"ses_parent",
+                "title":"Research (@general subagent)",
+                "directory":"/tmp/workspace"
+              }
+            }}
+            """
+        )
+
+        let mapped = OpenCodeNativeEventMapper.bridgeEvents(for: event)
+        XCTAssertEqual(mapped.count, 1)
+        XCTAssertEqual(mapped.first?.kind, .subagentStarted)
+        XCTAssertEqual(mapped.first?.sessionID, "ses_parent")
+        XCTAssertEqual(mapped.first?.subagentID, "ses_child")
+    }
+
+    func testReconciliationKeepsChildSessionsOutOfCardsAndReportsThemAsAgents() async throws {
+        OpenCodeStubURLProtocol.requests = []
+        OpenCodeStubURLProtocol.requestBodies = []
+        OpenCodeStubURLProtocol.responseBodies = [
+            "/session": Data(#"[{"id":"ses_parent","title":"Parent","directory":"/tmp/work"},{"id":"ses_child","title":"Research","directory":"/tmp/work","parentID":"ses_parent"},{"id":"ses_nested","title":"Check","directory":"/tmp/work","parentID":"ses_child"}]"#.utf8),
+            "/session/status": Data(#"{"ses_parent":{"type":"idle"},"ses_child":{"type":"busy"},"ses_nested":{"type":"idle"}}"#.utf8),
+            "/session/ses_parent/message": Data("[]".utf8),
+            "/permission": Data("[]".utf8)
+        ]
+        defer { OpenCodeStubURLProtocol.responseBodies = [:] }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OpenCodeStubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        let events = OpenCodeEventRecorder()
+        let client = OpenCodeNativeClient(
+            configuration: try OpenCodeServerConfiguration(baseURL: URL(string: "http://localhost:4096")!),
+            urlSession: session,
+            eventHandler: { event in await events.append(event) }
+        )
+
+        let snapshot = try await client.reconcile()
+        let delivered = await events.values
+
+        XCTAssertEqual(snapshot.sessions.map(\.id), ["ses_parent"])
+        XCTAssertEqual(snapshot.subagents.map(\.id), ["ses_child", "ses_nested"])
+        XCTAssertTrue(delivered.contains { $0.kind == .connect && $0.sessionID == "ses_parent" })
+        XCTAssertFalse(delivered.contains { $0.kind == .connect && $0.sessionID == "ses_child" })
+        XCTAssertTrue(delivered.contains {
+            $0.kind == .subagentStarted && $0.sessionID == "ses_parent" && $0.subagentID == "ses_child"
+        })
+        XCTAssertTrue(delivered.contains {
+            $0.kind == .subagentCompleted && $0.sessionID == "ses_parent" && $0.subagentID == "ses_nested"
+        })
     }
 
     func testMapperProducesSafePermissionAndToolChatEvents() throws {

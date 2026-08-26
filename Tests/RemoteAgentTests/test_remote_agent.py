@@ -69,6 +69,7 @@ class RemoteAgentTests(unittest.TestCase):
         self.agent.CONFIG_DIR = self.root / ".config" / "noturcode"
         self.agent.PAIR_FILE = self.agent.CONFIG_DIR / "pair.json"
         self.agent.BACKUP_DIR = self.agent.CONFIG_DIR / "backups"
+        self.agent.CONTEXT_DIR = self.agent.CONFIG_DIR / "session-contexts"
         self.agent.HOME_DIR = self.root
         self.agent.AGENT_PATH = self.root / ".local" / "bin" / "noturcode-agent"
 
@@ -128,6 +129,15 @@ class RemoteAgentTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), {})
         self.assertIn("skipped", error.getvalue())
 
+    def test_image_bridge_rejects_unsafe_tunnel_path(self):
+        with self.assertRaisesRegex(RuntimeError, "tunnel path"):
+            self.agent._valid_attach_context({
+                "socket": "/tmp/noturcode.sock;touch /tmp/bad",
+                "terminal": "terminal:iterm:session:ABC",
+                "host": "server-one",
+                "name": "remote build",
+            })
+
     def test_hook_install_preserves_other_commands_and_creates_backup(self):
         target = self.root / ".claude" / "settings.json"
         target.parent.mkdir(parents=True)
@@ -171,6 +181,49 @@ class RemoteAgentTests(unittest.TestCase):
 
         self.assertEqual(response["error"], "invalid code")
         self.assertEqual(app_server.request["type"], "remotePair")
+
+    def test_image_bridge_writes_remote_png_and_reports_ready(self):
+        import base64
+
+        self.agent.private_write(
+            self.agent.PAIR_FILE,
+            b'{"deviceID":"vps-1","deviceName":"test","token":"token-1"}\n',
+        )
+        image = b"\x89PNG\r\n\x1a\nnoturcode-test"
+        attachment_id = "a7906ac7-e382-4b83-a755-e0c43f490814"
+        requests = []
+
+        def exchange(request, **_kwargs):
+            requests.append(request)
+            if request["type"] == "remoteImageReady":
+                return {"ok": True}
+            if len([item for item in requests if item["type"] == "remoteImagePoll"]) == 1:
+                return {
+                    "ok": True,
+                    "attachmentID": attachment_id,
+                    "fileName": f"image-{attachment_id}.png",
+                    "totalBytes": len(image),
+                    "offset": 0,
+                    "chunk": base64.b64encode(image).decode("ascii"),
+                }
+            raise OSError("test tunnel closed")
+
+        with mock.patch.object(self.agent, "exchange", side_effect=exchange), \
+             mock.patch("time.sleep", return_value=None):
+            self.assertEqual(
+                self.agent.image_bridge(
+                    "/tmp/noturcode-me-context-123.sock",
+                    "terminal:iterm:session:ABC",
+                ),
+                0,
+            )
+
+        destination = self.root / ".cache" / "noturcode" / "attachments" / f"image-{attachment_id}.png"
+        self.assertEqual(destination.read_bytes(), image)
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o600)
+        ready = next(item for item in requests if item["type"] == "remoteImageReady")
+        self.assertEqual(ready["remotePath"], str(destination))
+        self.assertEqual(ready["terminalSessionID"], "terminal:iterm:session:ABC")
 
     def test_active_codex_session_ids_extracts_unique_resume_writers(self):
         process_list = """

@@ -25,6 +25,12 @@ struct NoturcodeApplication: App {
                 Button("Set Up or Repair Integrations…") {
                     IntegrationBootstrapper.shared.repairAndShowResult()
                 }
+                Button("Save iTerm Layout") {
+                    AppModel.shared.saveITermWorkspace()
+                }
+                Button("Relaunch iTerm Layout") {
+                    AppModel.shared.restoreITermWorkspace()
+                }
             }
         }
     }
@@ -53,6 +59,15 @@ final class NoturcodeAppDelegate: NSObject, NSApplicationDelegate {
                 case let .failed(message): print("ITERM_PROMPT_SELF_TEST:FAILED:\(message)")
                 }
                 NSApplication.shared.terminate(nil)
+            }
+            return
+        }
+
+        if CommandLine.arguments.contains("--chrome-tabs-self-test") {
+            Task.detached {
+                let result = ChromeBrowserTabs.selfTest()
+                print("CHROME_TABS_SELF_TEST:\(result)")
+                await MainActor.run { NSApplication.shared.terminate(nil) }
             }
             return
         }

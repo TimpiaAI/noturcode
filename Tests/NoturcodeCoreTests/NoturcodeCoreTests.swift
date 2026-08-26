@@ -5,6 +5,109 @@ import XCTest
 @testable import NoturcodeCore
 
 final class NoturcodeCoreTests: XCTestCase {
+    func testRecentApplicationHistoryKeepsThreeUniqueMostRecentApps() {
+        var history = RecentApplicationHistory(limit: 3)
+        let chrome = RecentApplicationRecord(bundleIdentifier: "com.google.Chrome", name: "Chrome", processIdentifier: 10)
+        let iterm = RecentApplicationRecord(bundleIdentifier: "com.googlecode.iterm2", name: "iTerm2", processIdentifier: 20)
+        let finder = RecentApplicationRecord(bundleIdentifier: "com.apple.finder", name: "Finder", processIdentifier: 30)
+        let safari = RecentApplicationRecord(bundleIdentifier: "com.apple.Safari", name: "Safari", processIdentifier: 40)
+
+        history.activate(chrome)
+        history.activate(iterm)
+        history.activate(finder)
+        history.activate(chrome)
+        XCTAssertEqual(history.items, [chrome, finder, iterm])
+
+        history.activate(safari)
+        XCTAssertEqual(history.items, [safari, chrome, finder])
+
+        history.terminate(processIdentifier: chrome.processIdentifier)
+        XCTAssertEqual(history.items, [safari, finder])
+    }
+
+    func testRecentAppsShelfIsCenteredOnLeftAndKeepsTheLastActiveTab() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RecentAppsCoordinator.swift"))
+
+        XCTAssertTrue(source.contains("x: screen.frame.minX"))
+        XCTAssertTrue(source.contains("y: screen.frame.midY - Self.envelopeSize.height / 2"))
+        XCTAssertTrue(source.contains("ForEach(store.items.prefix(3))"))
+        XCTAssertTrue(source.contains("NSWorkspace.didActivateApplicationNotification"))
+        XCTAssertTrue(source.contains("application.activate(options: [])"))
+        XCTAssertFalse(source.contains("application.activate(options: [.activateAllWindows"))
+        XCTAssertTrue(source.contains("RecentAppsPanelController(screen: screen"))
+    }
+
+    func testLocalInstallerUsesStableSigningIdentityWhenAvailable() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let installer = try String(contentsOf: repository.appendingPathComponent("scripts/install.sh"))
+
+        XCTAssertTrue(installer.contains("NOTURCODE_LOCAL_SIGNING_IDENTITY"))
+        XCTAssertTrue(installer.contains("Apple Development:"))
+        XCTAssertTrue(installer.contains("--sign \"$local_signing_identity\""))
+    }
+
+    func testBrowserTabWireParserKeepsWindowAndTabIdentity() {
+        let field = String(UnicodeScalar(31))
+        let row = String(UnicodeScalar(30))
+        let payload = [
+            ["44", "2", "Noda dashboard", "https://noda.energy/dashboard", "1"].joined(separator: field),
+            ["44", "3", "GitHub", "https://github.com/TimpiaAI/noturcode", "0"].joined(separator: field)
+        ].joined(separator: row)
+
+        let tabs = BrowserTabWireParser.parse(payload, bundleIdentifier: "com.google.Chrome")
+
+        XCTAssertEqual(tabs.count, 2)
+        XCTAssertEqual(tabs[0].windowIdentifier, 44)
+        XCTAssertEqual(tabs[0].tabIndex, 2)
+        XCTAssertEqual(tabs[0].title, "Noda dashboard")
+        XCTAssertTrue(tabs[0].isActive)
+        XCTAssertEqual(tabs[1].url, "https://github.com/TimpiaAI/noturcode")
+        XCTAssertFalse(tabs[1].isActive)
+    }
+
+    func testRecentAppsShelfCentersIconsAndShowsClickableChromeTabs() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RecentAppsCoordinator.swift"))
+
+        XCTAssertTrue(source.contains("private func collapsedAppIcon"))
+        XCTAssertTrue(source.contains("private func expandedAppRow"))
+        XCTAssertTrue(source.contains("Chrome tabs"))
+        XCTAssertTrue(source.contains("store.open(tab)"))
+        XCTAssertTrue(source.contains("NSAppleScript(source: script)"))
+        XCTAssertTrue(source.contains("browserTabIcons[tab.id]"))
+        XCTAssertTrue(source.contains("ChromeFaviconLoader.load"))
+        XCTAssertTrue(source.contains("first window whose id is targetWindowID"))
+        XCTAssertTrue(source.contains("set active tab index of targetWindow to targetTabIndex"))
+    }
+
+    func testRecentAppsShelfOwnsPointingHandBeforeFirstClick() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RecentAppsCoordinator.swift"))
+        let controllerStart = try XCTUnwrap(source.range(of: "private final class RecentAppsPanelController"))
+        let shelfStart = try XCTUnwrap(source.range(of: "private struct RecentAppsShelfView"))
+        let controller = String(source[controllerStart.lowerBound..<shelfStart.lowerBound])
+
+        XCTAssertTrue(controller.contains("panel.becomesKeyOnlyIfNeeded = true"))
+        XCTAssertTrue(controller.contains("panel.allowsToolTipsWhenApplicationIsInactive = true"))
+        XCTAssertTrue(controller.contains("surfaceMadeKeyForCursor"))
+        XCTAssertTrue(controller.contains("panel.makeKey()"))
+        XCTAssertTrue(controller.contains("panel.resignKey()"))
+        XCTAssertFalse(controller.contains("NSApp.activate"))
+    }
+
     func testRemoteTerminalIdentityRoundTripsUploadHost() throws {
         let identity = TerminalIdentity(
             application: .iterm,
@@ -76,6 +179,48 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(installer.contains("killall iTerm"))
         XCTAssertTrue(remoteDocs.contains("Image upload reuses that authenticated connection"))
         XCTAssertFalse(remoteDocs.contains("must accept a\nnon-interactive key-based SSH connection"))
+    }
+
+    func testRemoteImagePastePublishesLiveNotificationStages() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let paste = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/RemoteImagePasteCoordinator.swift"))
+        let model = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+        let announcements = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AnnouncementCoordinator.swift"))
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+
+        XCTAssertTrue(paste.contains("enum RemoteImagePasteStage"))
+        XCTAssertTrue(paste.contains("case preparing"))
+        XCTAssertTrue(paste.contains("case uploading(host: String)"))
+        XCTAssertTrue(paste.contains("case inserting(remotePath: String)"))
+        XCTAssertTrue(paste.contains("case sent(remotePath: String)"))
+        XCTAssertTrue(paste.contains("case failed(message: String)"))
+        XCTAssertTrue(paste.contains("progress(.preparing)"))
+        XCTAssertTrue(paste.contains("await Task.yield()"))
+        XCTAssertTrue(paste.contains("clipboardContainsImage()"))
+        XCTAssertTrue(paste.contains("case clipboardUnavailable"))
+        XCTAssertTrue(paste.contains("throw RemoteImagePasteError.clipboardUnavailable"))
+        XCTAssertTrue(paste.contains("No image was found on the Mac clipboard"))
+        XCTAssertTrue(paste.contains("progress(.uploading(host: host))"))
+        XCTAssertTrue(paste.contains("progress(.inserting(remotePath: remotePath))"))
+        XCTAssertTrue(paste.contains("progress(.sent(remotePath: remotePath))"))
+        XCTAssertTrue(model.contains("announcements.updateRemoteImagePaste"))
+        XCTAssertTrue(model.contains(".failed(message: error.localizedDescription)"))
+        XCTAssertTrue(announcements.contains("func updateRemoteImagePaste"))
+        XCTAssertTrue(paste.contains("var isTerminal"))
+        XCTAssertTrue(announcements.contains("if current.shouldAutoDismiss"))
+        XCTAssertTrue(announcements.contains("private var isHovered = false"))
+        XCTAssertFalse(announcements.contains("if stage.isTerminal, !isHovered"))
+        XCTAssertTrue(announcements.contains("static let visibleDuration: TimeInterval = 3.2"))
+        XCTAssertTrue(announcements.contains("if !isHovered { scheduleCompletion(after: active.remaining) }"))
+        XCTAssertTrue(surface.contains("Preparing image"))
+        XCTAssertTrue(surface.contains("Uploading image"))
+        XCTAssertTrue(surface.contains("Sending image to the session"))
+        XCTAssertTrue(surface.contains("Image sent"))
+        XCTAssertTrue(surface.contains("Upload failed"))
+        XCTAssertTrue(surface.contains("ProgressView()"))
     }
 
     func testITermImagePathInsertDoesNotPressEnter() throws {
@@ -165,6 +310,56 @@ final class NoturcodeCoreTests: XCTestCase {
         ))
     }
 
+    func testTranscriptRunStateDetectsCodexAbortAndCompletion() throws {
+        let prompt = ISO8601DateFormatter().date(from: "2026-08-15T11:28:39Z")!
+        let started = """
+        {"timestamp":"2026-08-15T11:28:38.406Z","type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}
+        """
+        let aborted = started + "\n" + """
+        {"timestamp":"2026-08-15T11:28:39.159Z","type":"event_msg","payload":{"type":"turn_aborted","turn_id":"turn-1","reason":"interrupted"}}
+        """
+        let completed = started + "\n" + """
+        {"timestamp":"2026-08-15T11:28:45.159Z","type":"event_msg","payload":{"type":"task_complete","turn_id":"turn-1"}}
+        """
+
+        XCTAssertEqual(
+            TranscriptRunStateDetector.turnState(data: Data(started.utf8), source: .codex, after: prompt),
+            .active
+        )
+        XCTAssertEqual(
+            TranscriptRunStateDetector.turnState(data: Data(aborted.utf8), source: .codex, after: prompt),
+            .interrupted
+        )
+        XCTAssertEqual(
+            TranscriptRunStateDetector.turnState(data: Data(completed.utf8), source: .codex, after: prompt),
+            .completed
+        )
+    }
+
+    @MainActor
+    func testInterruptedTurnBecomesIdleWithoutDisconnectingSession() throws {
+        let persistence = SessionPersistence(fileURL: FileManager.default.temporaryDirectory
+            .appendingPathComponent("noturcode-interrupted-\(UUID().uuidString).json"))
+        let store = SessionStore(persistence: persistence)
+        let key = SessionKey(source: .codex, sessionID: "interrupted")
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: key.source,
+            sessionID: key.sessionID,
+            name: "nc",
+            terminalSessionID: "terminal-1",
+            sourceProcessID: 123
+        ))
+        _ = store.apply(BridgeEvent(kind: .promptSubmitted, source: key.source, sessionID: key.sessionID))
+        _ = store.apply(BridgeEvent(kind: .turnInterrupted, source: key.source, sessionID: key.sessionID))
+
+        let session = try XCTUnwrap(store.sessions.first)
+        XCTAssertEqual(session.state, .idle)
+        XCTAssertNil(session.currentActivity)
+        XCTAssertEqual(session.sourceProcessID, 123)
+        XCTAssertEqual(session.terminal?.sessionID, "terminal-1")
+    }
+
     func testTranscriptRevisionChangesOnlyWhenFileChanges() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("noturcode-transcript-revision-\(UUID().uuidString).jsonl")
@@ -194,11 +389,12 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(appModel.contains("startTranscriptReconciliation()"))
         XCTAssertTrue(appModel.contains("Task.detached(priority: .utility)"))
-        XCTAssertTrue(appModel.contains("session.key.source == .claude"))
+        XCTAssertTrue(appModel.contains("session.key.source == .claude || session.key.source == .codex"))
         XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.revision"))
         XCTAssertTrue(appModel.contains("previousFingerprints[candidate.key] != fingerprint"))
-        XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.turnCompleted"))
+        XCTAssertTrue(appModel.contains("TranscriptRunStateDetector.turnState"))
         XCTAssertTrue(appModel.contains("kind: .responseCompleted"))
+        XCTAssertTrue(appModel.contains("kind: .turnInterrupted"))
     }
 
     func testSessionPersistenceUsesPrivateDirectoryAndFilePermissions() throws {
@@ -420,6 +616,8 @@ final class NoturcodeCoreTests: XCTestCase {
         let shell = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-shell.zsh"))
         let cli = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-cli.zsh"))
         let agent = try String(contentsOf: repository.appendingPathComponent("Integrations/noturcode-agent.py"))
+        let provider = try String(contentsOf: repository.appendingPathComponent("Integrations/iterm2-ask-noturcode.py"))
+        let setup = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/IntegrationBootstrapper.swift"))
 
         XCTAssertTrue(shell.contains("nc()"))
         XCTAssertTrue(shell.contains("command /usr/bin/nc"))
@@ -441,6 +639,10 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(agent.contains("remoteHook"))
         XCTAssertTrue(agent.contains("NOTURCODE_SESSION_NAME"))
         XCTAssertTrue(agent.contains("Hooks must fail open"))
+        XCTAssertFalse(agent.contains("commands.add_parser(\"attach\")"))
+        XCTAssertFalse(provider.contains("Connect Session to Noturcode"))
+        XCTAssertFalse(provider.contains("auto_connect_ssh_sessions"))
+        XCTAssertFalse(setup.contains("ControlMaster auto"))
     }
 
     func testITermSelectionIntegrationUsesSelectionReferenceAndIsolatedClaudeRun() throws {
@@ -462,6 +664,11 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertFalse(panel.contains("didAskAutomatically"))
         XCTAssertFalse(panel.contains(".task {"))
         XCTAssertTrue(panel.contains("Nothing is sent until you press Ask"))
+        XCTAssertTrue(integration.contains("async def watch_closed_sessions(connection)"))
+        XCTAssertTrue(integration.contains("tab.all_sessions"))
+        XCTAssertTrue(integration.contains("missing_counts[terminal_id] >= 2"))
+        XCTAssertTrue(integration.contains("\"--kind\", \"sessionEnded\""))
+        XCTAssertTrue(integration.contains("if await emit_session_ended(source, session_id, terminal_id):"))
     }
 
     func testAttentionBannersAreDismissedWhenTheSessionWorksAgain() throws {
@@ -486,6 +693,8 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(installer.contains("tell application id \"ro.noturcode.app\" to quit"))
         XCTAssertTrue(installer.contains("pgrep -x Noturcode >/dev/null || break"))
+        XCTAssertTrue(installer.contains("$1 == \"/Applications/iTerm.app/Contents/MacOS/iTerm2\""))
+        XCTAssertTrue(installer.contains("/bin/kill \"$provider_pid\""))
     }
 
     func testIntegrationSetupRequiresExplicitActionAndBacksUpReplacedFiles() throws {
@@ -502,8 +711,36 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(setup.contains("Set up Noturcode integrations?"))
         XCTAssertTrue(setup.contains("backupExistingFile(destination"))
         XCTAssertTrue(setup.contains("backupDirectory: backup"))
+        XCTAssertTrue(setup.contains("removeLegacySummarySkill"))
+        XCTAssertFalse(setup.contains("noturcode-summary-skill.md"))
+        XCTAssertTrue(setup.contains("const parents = new Map()"))
+        XCTAssertTrue(setup.contains("const directParent = reportedParent(p)"))
+        XCTAssertTrue(setup.contains("\"--kind\", \"subagentStarted\""))
+        XCTAssertFalse(setup.contains("if (parentID) return"))
+        XCTAssertTrue(setup.contains("...args, \"--pid\", String(process.pid)"))
+        XCTAssertTrue(setup.contains("event.type === \"session.created\" || event.type === \"session.updated\""))
+        XCTAssertTrue(setup.contains("event.type === \"session.idle\") emit([\"--session\", s, \"--kind\", \"turnInterrupted\"])"))
+        XCTAssertFalse(setup.contains("event.type === \"session.idle\") emit([\"--session\", s, \"--kind\", \"responseCompleted\"])"))
         XCTAssertTrue(installer.contains("--integration-self-test \"$HOME\""))
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+        XCTAssertTrue(bridge.contains("isOpenCodeChildSession(sessionID)"))
+        XCTAssertTrue(bridge.contains("SELECT parent_id FROM session"))
         XCTAssertTrue(installer.contains("app-backups/$backup_stamp"))
+    }
+
+    func testBridgeDoesNotInjectOrRequireAgentSummaryFormat() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let bridge = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeBridge/main.swift"))
+        let project = try String(contentsOf: repository.appendingPathComponent("project.yml"))
+
+        XCTAssertFalse(bridge.contains("NoturcodeSummaryContract.instruction"))
+        XCTAssertFalse(bridge.contains("shouldRequestSummary"))
+        XCTAssertFalse(bridge.contains("shouldInject(for:"))
+        XCTAssertFalse(project.contains("noturcode-summary-skill"))
+        XCTAssertTrue(project.contains("rm -rf \"$payload\""))
     }
 
     func testFullIntegrationUninstallSupportsDryRunAndKeepsDataByDefault() throws {
@@ -638,6 +875,8 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(AgentSource.claude.displayName, "Claude Code")
         XCTAssertEqual(AgentSource.codex.displayName, "Codex")
         XCTAssertEqual(AgentSource.gemini.displayName, "Gemini CLI")
+        XCTAssertEqual(AgentSource.pi.displayName, "Pi")
+        XCTAssertEqual(AgentSource.omp.displayName, "OMP")
         XCTAssertEqual(AgentSource.opencode.displayName, "OpenCode")
         XCTAssertEqual(AgentSource.grok.displayName, "Grok")
         XCTAssertEqual(AgentSource.harness.displayName, "Harness")
@@ -863,47 +1102,14 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(entries.contains { $0.kind == .assistant && $0.text == "Visible answer" })
     }
 
-    func testNoturcodeSummaryContractRecognizesCompleteNaturalHandoff() {
-        let mappedSummary = """
-        Noturcode completion map
-        ```text
-        +----------+     +-----------+
-        | FIXED UI | --> | VERIFIED  |
-        +----------+     +-----------+
-        ```
+    func testNoturcodeSummaryContractOnlyKeepsLegacySummariesReadable() {
+        let legacySummary = """
         Noturcode summary
-        Done: [x] Fixed the animation -> [x] Verified the build
+        Done: Fixed the animation.
         Needs you: Nothing.
         """
-        XCTAssertTrue(NoturcodeSummaryContract.isCompliant(mappedSummary))
-        XCTAssertEqual(
-            NoturcodeSummaryContract.completionMap(in: mappedSummary),
-            "+----------+     +-----------+\n| FIXED UI | --> | VERIFIED  |\n+----------+     +-----------+"
-        )
-        XCTAssertFalse(NoturcodeSummaryContract.isCompliant("""
-        Noturcode summary
-        Done: [x] Fixed the animation -> [x] Verified the build
-        Needs you: Nothing.
-        """))
-        XCTAssertFalse(NoturcodeSummaryContract.isCompliant("""
-        Noturcode summary
-        Done: Fixed and verified the animation.
-        Needs you: Nothing.
-        """))
-        XCTAssertTrue(NoturcodeSummaryContract.isDisplayable("""
-        Noturcode summary
-        Done: Fixed and verified the animation.
-        Needs you: Nothing.
-        """))
-        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("Noturcode completion map"))
-        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("ASCII boxes, branches, and arrows"))
-        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("at most 16 lines"))
-        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("changed file or component"))
-        XCTAssertTrue(NoturcodeSummaryContract.instruction.contains("exact verification result"))
-        XCTAssertFalse(NoturcodeSummaryContract.isCompliant("Done with the animation."))
-        XCTAssertTrue(NoturcodeSummaryContract.shouldInject(for: "Fix the animation"))
-        XCTAssertFalse(NoturcodeSummaryContract.shouldInject(for: "/compact"))
-        XCTAssertFalse(NoturcodeSummaryContract.shouldInject(for: "  /model gpt-5  "))
+        XCTAssertTrue(NoturcodeSummaryContract.isDisplayable(legacySummary))
+        XCTAssertFalse(NoturcodeSummaryContract.isDisplayable("Done with the animation."))
     }
 
     func testDoneAnnouncementHasNoDecorativeUnderline() throws {
@@ -1092,8 +1298,10 @@ final class NoturcodeCoreTests: XCTestCase {
             size: size
         )
 
-        XCTAssertEqual(bottom, CGPoint(x: 1_022, y: -834))
-        XCTAssertEqual(top, CGPoint(x: 2_506, y: 30))
+        XCTAssertEqual(bottom, CGPoint(x: 1_022, y: -782))
+        XCTAssertEqual(top, CGPoint(x: 2_506, y: -14))
+        XCTAssertLessThan(bottom.y, -800 + 18 + 0.01)
+        XCTAssertGreaterThan(top.y + size.height, 100 - 18 - 0.01)
     }
 
     func testAttentionBannerClickFocusesItsITermSession() throws {
@@ -1108,7 +1316,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(coordinator.contains("model.jump(to: session)"))
         XCTAssertTrue(coordinator.contains("model.announcements.dismiss(sessionKey: sessionKey)"))
         XCTAssertTrue(coordinator.contains("hostingView.onClick = { [weak self] in"))
-        XCTAssertTrue(coordinator.contains("AnnouncementView(announcement: announcement)"))
+        XCTAssertTrue(coordinator.contains("AnnouncementView(announcement: announcement, hoverState: hoverState)"))
         XCTAssertTrue(coordinator.contains("NSClickGestureRecognizer(target: self"))
         XCTAssertTrue(coordinator.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }"))
         XCTAssertTrue(notch.contains(".accessibilityHint(\"Focus this session in iTerm2\")"))
@@ -1220,6 +1428,29 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("disconnect-noturcode-"))
     }
 
+    func testSessionRowsOfferRenameFromTheContextMenu() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let views = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+        let model = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+
+        XCTAssertTrue(views.contains("let onRename: () -> Void"))
+        XCTAssertTrue(views.contains("Button(\"Rename session…\", action: onRename)"))
+        XCTAssertTrue(views.contains(".contextMenu"))
+        XCTAssertTrue(views.contains("model.promptToRename(session)"))
+        XCTAssertTrue(model.contains("func promptToRename(_ session: TrackedSession)"))
+        XCTAssertTrue(model.contains("store.rename(session.key, to: field.stringValue)"))
+    }
+
+    func testProcessAncestryRecognizesEverySupportedHarnessProcess() {
+        for command in ["/opt/homebrew/bin/codex", "/usr/local/bin/claude", "gemini", "pi", "omp", "opencode", "grok", "node", "bun"] {
+            XCTAssertTrue(ProcessAncestry.isAgentProcess(command), command)
+        }
+        XCTAssertFalse(ProcessAncestry.isAgentProcess("/bin/zsh"))
+    }
+
     func testHardwareNotchUsesCameraHeightAsItsCompactRail() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1259,8 +1490,100 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("metrics.expandedSurfaceWidth(sessionNames:"))
         XCTAssertTrue(coordinator.contains("? min(820"))
         XCTAssertTrue(coordinator.contains("hasHardwareNotch ? neckHeight : 42"))
-        XCTAssertTrue(coordinator.contains("contentWidth + neckWidth"))
+        XCTAssertTrue(coordinator.contains("let fusedWidth = neckWidth + 2 * max(leftWingWidth, rightWingWidth) + 28"))
         XCTAssertTrue(coordinator.contains("func expandedSurfaceWidth(sessionNames:"))
+    }
+
+    func testBuiltInCompactNotchShowsOneNamedSessionAndOneOverflowChip() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let headerStart = try XCTUnwrap(surface.range(of: "private var hardwareNotchHeader"))
+        let stripStart = try XCTUnwrap(surface.range(of: "private func sessionStrip", range: headerStart.lowerBound..<surface.endIndex))
+        let header = String(surface[headerStart.lowerBound..<stripStart.lowerBound])
+
+        XCTAssertTrue(header.contains("let primarySession = sessions.first"))
+        XCTAssertTrue(header.contains("let additionalSessions = Array(sessions.dropFirst())"))
+        XCTAssertTrue(header.contains("sessionChip(primarySession"))
+        XCTAssertTrue(header.contains("overflowChip(sessions: additionalSessions, width: 78)"))
+        XCTAssertTrue(header.contains("alignment: isExpanded ? .leading : .trailing"))
+        XCTAssertTrue(header.contains(".opacity(isExpanded ? 0 : 1)"))
+        XCTAssertFalse(header.contains("sessions.prefix(3)"))
+        XCTAssertTrue(coordinator.contains("let hardwareOverflowWidth: CGFloat = 78"))
+    }
+
+    func testExpandedHardwareNotchShowsQuoteBelowTheCameraGap() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let headerStart = try XCTUnwrap(surface.range(of: "private var hardwareNotchHeader"))
+        let stripStart = try XCTUnwrap(surface.range(of: "private func sessionStrip", range: headerStart.lowerBound..<surface.endIndex))
+        let header = String(surface[headerStart.lowerBound..<stripStart.lowerBound])
+
+        XCTAssertTrue(surface.contains("private var dockHeaderHeight: CGFloat"))
+        XCTAssertTrue(surface.contains("metrics.neckHeight + 30"))
+        XCTAssertTrue(header.contains("BillGatesQuoteRotator(alignment: .center)"))
+        XCTAssertTrue(header.contains(".opacity(isExpanded ? 1 : 0)"))
+        XCTAssertTrue(header.contains(".frame(height: 30)"))
+        XCTAssertTrue(surface.contains("let alignment: Alignment"))
+        XCTAssertTrue(surface.contains(".frame(maxWidth: .infinity, alignment: alignment)"))
+    }
+
+    func testHardwareNotchKeepsHeaderLayersMountedDuringCollapse() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let headerStart = try XCTUnwrap(surface.range(of: "private var hardwareNotchHeader"))
+        let stripStart = try XCTUnwrap(surface.range(of: "private func sessionStrip", range: headerStart.lowerBound..<surface.endIndex))
+        let header = String(surface[headerStart.lowerBound..<stripStart.lowerBound])
+
+        XCTAssertFalse(header.contains("if !isExpanded"))
+        XCTAssertFalse(header.contains("if isExpanded {"))
+        XCTAssertTrue(header.contains(".animation(compactContentAnimation, value: isExpanded)"))
+        XCTAssertTrue(header.contains(".animation(quoteContentAnimation, value: isExpanded)"))
+    }
+
+    func testBuiltInNotchExpandsWidthWithTheSharedSurfaceSpring() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+
+        XCTAssertTrue(coordinator.contains("let expandedTarget = min(640, envelopeWidth - 16)"))
+        XCTAssertTrue(coordinator.contains("return max(expandedTarget, collapsedWidth(sessionNames: sessionNames))"))
+        XCTAssertTrue(surface.contains(".spring(response: 0.24, dampingFraction: 0.90)"))
+        XCTAssertTrue(surface.contains(".spring(response: 0.20, dampingFraction: 1.0)"))
+        XCTAssertFalse(surface.contains("hardwareNotchAnimation"))
+        XCTAssertFalse(
+            surface.contains("value: surfaceHeight"),
+            "Width and height must use one expansion transaction; a second height animation splits the laptop notch motion."
+        )
+    }
+
+    func testNotchHoverStartsTheSurfaceSpringWithoutEntryDwell() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        let stateStart = try XCTUnwrap(coordinator.range(of: "final class NotchPresentationState"))
+        let pointerStart = try XCTUnwrap(coordinator.range(of: "func pointerMoved(inside: Bool)", range: stateStart.lowerBound..<coordinator.endIndex))
+        let hoverStart = try XCTUnwrap(coordinator.range(of: "\n    func setHoveredSession", range: pointerStart.lowerBound..<coordinator.endIndex))
+        let pointer = String(coordinator[pointerStart.lowerBound..<hoverStart.lowerBound])
+
+        XCTAssertTrue(pointer.contains("isExpanded = true"))
+        XCTAssertFalse(pointer.contains("milliseconds(70)"))
+        XCTAssertFalse(pointer.contains("dwellTask"))
+        XCTAssertTrue(pointer.contains("milliseconds(60)"))
     }
 
     func testHardwareSurfaceAlwaysFillsTheTopShoulders() throws {
@@ -1320,8 +1643,9 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(views.contains("isImagePasteShortcut(event)"))
         XCTAssertTrue(views.contains("event.modifierFlags.contains(.option)"))
         XCTAssertTrue(views.contains("accessibilityIdentifier(\"prompt-image-attachment\")"))
-        XCTAssertTrue(views.contains("private var completionMapWidth: CGFloat"))
-        XCTAssertFalse(views.contains("if let completionMap {\n                ScrollView(.horizontal)"))
+        XCTAssertFalse(views.contains("DoneSummaryPreview"))
+        XCTAssertFalse(views.contains("done-summary-popover"))
+        XCTAssertFalse(views.contains("completionMapWidth"))
     }
 
     func testPromptTimelineUsesFullConversationHeightAndUnclippedPopover() throws {
@@ -1536,6 +1860,48 @@ final class NoturcodeCoreTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionStoreRecoversLiveRemoteSnapshotOverStaleLocalTarget() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let persistence = SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json"))
+        let now = Date(timeIntervalSince1970: 1_000)
+        let key = SessionKey(source: .codex, sessionID: "remote-chat")
+        var stale = TrackedSession(
+            key: key,
+            name: "gprc 2",
+            terminal: TerminalTarget(sessionID: "w0t0p3:23FB1192-1E94-4C6D-AFD8-958D891E2C3B"),
+            sourceProcessID: 42,
+            cwd: "/root/project",
+            connectedAt: now,
+            lastPromptAt: now,
+            stateChangedAt: now
+        )
+        try persistence.save([stale])
+        stale.terminal = TerminalTarget(sessionID: TerminalIdentity(
+            application: .iterm,
+            nativeSessionID: "w0t0p3:23FB1192-1E94-4C6D-AFD8-958D891E2C3B",
+            remoteHost: "gprc"
+        ).sessionID)
+
+        let store = SessionStore(persistence: persistence, recoveredRemoteSessions: [stale])
+
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.sessions.first?.terminal?.identity?.remoteHost, "gprc")
+    }
+
+    func testAppModelPersistsRemoteSnapshotsAcrossAppReplacement() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/AppModel.swift"))
+
+        XCTAssertTrue(source.contains("SessionStore(recoveredRemoteSessions: registry.sessions())"))
+        XCTAssertTrue(source.contains("remoteTerminalRegistry.remember(session)"))
+        XCTAssertTrue(source.contains("remoteTerminalRegistry.forgetSession(event.key)"))
+    }
+
+    @MainActor
     func testReconnectPreservesPromptRecency() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
@@ -1568,6 +1934,56 @@ final class NoturcodeCoreTests: XCTestCase {
         ))
 
         XCTAssertEqual(store.sessions.first?.lastPromptAt, firstPrompt)
+    }
+
+    @MainActor
+    func testOpenCodeProviderUpdateCannotRenameTheCard() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: .opencode,
+            sessionID: "stable-name",
+            name: "My OpenCode chat",
+            terminalSessionID: "terminal:iterm:session:OPEN"
+        ))
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: .opencode,
+            sessionID: "stable-name",
+            name: "Provider generated title",
+            terminalSessionID: "terminal:iterm:session:OPEN"
+        ))
+
+        XCTAssertEqual(store.sessions.first?.name, "My OpenCode chat")
+    }
+
+    @MainActor
+    func testLegacyOpenCodeCompletionEventKeepsTheLiveSessionIdle() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: .opencode,
+            sessionID: "legacy-plugin",
+            name: "OpenCode",
+            terminalSessionID: "terminal:iterm:session:OPEN"
+        ))
+        _ = store.apply(BridgeEvent(
+            kind: .activityStarted,
+            source: .opencode,
+            sessionID: "legacy-plugin",
+            activity: "working"
+        ))
+        _ = store.apply(BridgeEvent(
+            kind: .responseCompleted,
+            source: .opencode,
+            sessionID: "legacy-plugin"
+        ))
+
+        XCTAssertEqual(store.sessions.first?.state, .idle)
     }
 
     func testOpenCodeTranscriptDiscoveryNeverFallsBackToAnUnrelatedDatabase() throws {
@@ -1624,6 +2040,31 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertEqual(session.sourceProcessID, 442)
         XCTAssertEqual(session.transcriptPath, "/tmp/auto-session.jsonl")
         XCTAssertEqual(session.state, .idle)
+    }
+
+    @MainActor
+    func testPromptRecoversRemoteSessionWhenResumeOmitsSessionStart() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+        let promptAt = Date(timeIntervalSince1970: 2_100)
+
+        let transition = store.apply(BridgeEvent(
+            kind: .promptSubmitted,
+            source: .codex,
+            sessionID: "resumed-remote-session",
+            timestamp: promptAt,
+            name: "bima",
+            terminalSessionID: "terminal:iterm:session:REMOTE",
+            sourceProcessID: 974446,
+            cwd: "/root",
+            prompt: "continue"
+        ))
+
+        let session = try XCTUnwrap(transition?.new)
+        XCTAssertEqual(session.name, "bima")
+        XCTAssertEqual(session.terminal?.sessionID, "terminal:iterm:session:REMOTE")
+        XCTAssertEqual(session.sourceProcessID, 974446)
+        XCTAssertEqual(session.state, .working)
     }
 
     @MainActor
@@ -1694,7 +2135,7 @@ final class NoturcodeCoreTests: XCTestCase {
     }
 
     @MainActor
-    func testHarnessSessionEndDoesNotRemoveExplicitConnection() throws {
+    func testHarnessSessionEndRemovesConnectionAndBlocksLateEventsUntilExplicitReconnect() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let persistence = SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json"))
         let store = SessionStore(persistence: persistence)
@@ -1725,20 +2166,115 @@ final class NoturcodeCoreTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 12)
         ))
 
-        let retained = try XCTUnwrap(store.sessions.first(where: { $0.key == key }))
-        XCTAssertEqual(retained.name, "noda-blog")
-        XCTAssertEqual(retained.state, .idle)
-        XCTAssertNil(retained.sourceProcessID)
-        XCTAssertNil(retained.currentActivity)
+        XCTAssertTrue(store.sessions.isEmpty)
         store.flushPersistenceForTesting()
-        XCTAssertEqual(SessionPersistence(fileURL: persistence.fileURL).load().map(\.name), ["noda-blog"])
+        XCTAssertTrue(SessionPersistence(fileURL: persistence.fileURL).load().isEmpty)
 
-        _ = store.apply(BridgeEvent(
-            kind: .disconnect,
+        XCTAssertNil(store.apply(BridgeEvent(
+            kind: .promptSubmitted,
             source: key.source,
             sessionID: key.sessionID,
             timestamp: Date(timeIntervalSince1970: 13)
+        )))
+        XCTAssertNil(store.apply(BridgeEvent(
+            kind: .sessionStarted,
+            source: key.source,
+            sessionID: key.sessionID,
+            timestamp: Date(timeIntervalSince1970: 14),
+            name: "late event",
+            terminalSessionID: "w0t1p2:LATE",
+            sourceProcessID: 83420
+        )))
+        XCTAssertTrue(store.sessions.isEmpty)
+
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: key.source,
+            sessionID: key.sessionID,
+            timestamp: Date(timeIntervalSince1970: 15),
+            name: "noda-blog",
+            terminalSessionID: "w0t1p2:RECONNECTED",
+            sourceProcessID: 83420
         ))
+        XCTAssertEqual(store.sessions.first?.terminal?.sessionID, "w0t1p2:RECONNECTED")
+    }
+
+    @MainActor
+    func testManualDisconnectBlocksAutomaticReappearanceUntilExplicitConnect() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = SessionStore(persistence: SessionPersistence(fileURL: directory.appendingPathComponent("sessions.json")))
+        let key = SessionKey(source: .codex, sessionID: "manual-close")
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: key.source,
+            sessionID: key.sessionID,
+            name: "nc",
+            terminalSessionID: "w0t1p2:MANUAL"
+        ))
+
+        store.remove(key)
+        XCTAssertNil(store.apply(BridgeEvent(
+            kind: .sessionStarted,
+            source: key.source,
+            sessionID: key.sessionID,
+            name: "late start",
+            terminalSessionID: "w0t1p2:LATE"
+        )))
+        XCTAssertTrue(store.sessions.isEmpty)
+
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: key.source,
+            sessionID: key.sessionID,
+            name: "renamed by reconnect",
+            terminalSessionID: "w0t1p2:NEW"
+        ))
+        XCTAssertEqual(store.sessions.first?.name, "renamed by reconnect")
+    }
+
+    @MainActor
+    func testSessionStoreRenamesAndPersistsAConnectedSession() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("sessions.json")
+        let persistence = SessionPersistence(fileURL: fileURL)
+        let store = SessionStore(persistence: persistence)
+        let key = SessionKey(source: .claude, sessionID: "rename-me")
+        _ = store.apply(BridgeEvent(
+            kind: .connect,
+            source: key.source,
+            sessionID: key.sessionID,
+            name: "old name",
+            terminalSessionID: "w0t1p2:RENAME"
+        ))
+
+        XCTAssertTrue(store.rename(key, to: "  renamed session  "))
+        XCTAssertEqual(store.sessions.first?.name, "renamed session")
+        XCTAssertFalse(store.rename(key, to: "\n  "))
+        store.flushPersistenceForTesting()
+        XCTAssertEqual(SessionPersistence(fileURL: fileURL).load().first?.name, "renamed session")
+    }
+
+    @MainActor
+    func testSessionStoreDoesNotResurrectTerminalCardsWithoutALiveOwner() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathComponent("sessions.json")
+        let persistence = SessionPersistence(fileURL: fileURL)
+        let stale = TrackedSession(
+            key: SessionKey(source: .codex, sessionID: "stale-terminal"),
+            name: "stale",
+            terminal: TerminalTarget(sessionID: "w0t1p2:STALE"),
+            sourceProcessID: nil,
+            cwd: "/tmp",
+            state: .idle,
+            connectedAt: Date(timeIntervalSince1970: 1),
+            lastPromptAt: Date(timeIntervalSince1970: 1),
+            stateChangedAt: Date(timeIntervalSince1970: 1)
+        )
+        try persistence.save([stale])
+
+        let store = SessionStore(persistence: persistence)
         XCTAssertTrue(store.sessions.isEmpty)
     }
 
@@ -1871,7 +2407,7 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(source.contains("target.applicationKind == .iterm"))
     }
 
-    func testPillActivityCollapseCoordinatesOuterAndInnerGeometry() throws {
+    func testPillActivityCollapseUsesTheSharedExpansionTransaction() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -1880,7 +2416,8 @@ final class NoturcodeCoreTests: XCTestCase {
         let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
         let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
-        XCTAssertTrue(surface.contains("value: surfaceHeight"))
+        XCTAssertTrue(surface.contains("value: state.isExpanded"))
+        XCTAssertFalse(surface.contains("value: surfaceHeight"))
         XCTAssertFalse(sessions.contains(".transition(.opacity.combined(with: .move(edge: .top)))"))
         XCTAssertTrue(coordinator.contains("return summaryAllowance"))
         XCTAssertFalse(coordinator.contains("activityExpandedSessionID"))
@@ -1898,8 +2435,11 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("private var dockHeader: some View"))
         XCTAssertFalse(surface.contains("private var activeDockHeader: some View"))
         XCTAssertFalse(surface.contains("private var persistentDockHeader: some View"))
-        let stackStart = try XCTUnwrap(surface.range(of: "VStack(spacing: 0)"))
-        let headerDefinition = try XCTUnwrap(surface.range(of: "private var dockHeader"))
+        let bodyStart = try XCTUnwrap(surface.range(of: "var body: some View"))
+        let headerDefinition = try XCTUnwrap(surface.range(of: "private var dockHeader: some View"))
+        let stackStart = try XCTUnwrap(
+            surface.range(of: "VStack(spacing: 0)", range: bodyStart.lowerBound..<headerDefinition.lowerBound)
+        )
         let composition = String(surface[stackStart.lowerBound..<headerDefinition.lowerBound])
         let header = try XCTUnwrap(composition.range(of: "dockHeader"))
         let details = try XCTUnwrap(composition.range(of: "expandedDetails"))
@@ -1967,6 +2507,56 @@ final class NoturcodeCoreTests: XCTestCase {
 
         XCTAssertTrue(hosting.contains("override func resetCursorRects()"))
         XCTAssertTrue(hosting.contains("addCursorRect(bounds, cursor: .pointingHand)"))
+        XCTAssertTrue(hosting.contains("NSTrackingArea("))
+        XCTAssertTrue(hosting.contains("override func mouseEntered"))
+        XCTAssertTrue(hosting.contains("override func mouseMoved"))
+        XCTAssertTrue(hosting.contains("override func mouseExited"))
+        XCTAssertTrue(hosting.contains("PointingHandCursorCoordinator.shared.setActive(true"))
+        XCTAssertTrue(hosting.contains("PointingHandCursorCoordinator.shared.setActive(false"))
+        XCTAssertTrue(hosting.contains("PointingHandCursorCoordinator.shared.refreshPointingHandIfActive()"))
+        XCTAssertTrue(hosting.contains("override func viewWillMove(toWindow newWindow: NSWindow?)"))
+
+        let controllerStart = try XCTUnwrap(source.range(of: "private final class AttentionAnnouncementPanelController"))
+        let presentationStateStart = try XCTUnwrap(source.range(of: "@MainActor\nfinal class NotchPresentationState"))
+        let controller = String(source[controllerStart.lowerBound..<presentationStateStart.lowerBound])
+        let orderFront = try XCTUnwrap(controller.range(of: "panel.orderFrontRegardless()"))
+        let presentation = String(controller[orderFront.lowerBound...])
+        XCTAssertTrue(controller.contains("panel.acceptsMouseMovedEvents = true"))
+        XCTAssertTrue(presentation.contains("panel.enableCursorRects()"))
+        XCTAssertTrue(presentation.contains("panel.resetCursorRects()"))
+    }
+
+    func testAnnouncementHoverUsesSharedCursorAndNodaOuterGlow() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
+        let start = try XCTUnwrap(source.range(of: "struct AnnouncementView: View"))
+        let end = try XCTUnwrap(source.range(of: "private struct AnnouncementProgressRing"))
+        let announcement = String(source[start.lowerBound..<end.lowerBound])
+
+        XCTAssertTrue(source.contains("final class AnnouncementHoverState: ObservableObject"))
+        XCTAssertTrue(announcement.contains("@ObservedObject var hoverState: AnnouncementHoverState"))
+        XCTAssertFalse(announcement.contains("@State private var isHovered = false"))
+        XCTAssertTrue(announcement.contains("NodaConicGlow("))
+        XCTAssertTrue(source.contains("struct NodaConicGlow: NSViewRepresentable"))
+        XCTAssertTrue(source.contains("final class NodaConicGlowView: NSView"))
+        XCTAssertTrue(source.contains("CAGradientLayer"))
+        XCTAssertTrue(source.contains("CABasicAnimation(keyPath: \"transform.rotation.z\")"))
+        XCTAssertTrue(source.contains("rotation.repeatCount = .infinity"))
+        XCTAssertFalse(source.contains("TimelineView(.animation(minimumInterval: 1.0 / 30.0"))
+        XCTAssertFalse(announcement.contains(".shadow(color: nodaGlow.opacity"))
+        XCTAssertTrue(announcement.contains("isActive: hoverState.isHovered"))
+        XCTAssertTrue(announcement.contains(".animation(reduceMotion ? nil : .easeInOut(duration: 0.45), value: hoverState.isHovered)"))
+        XCTAssertFalse(announcement.contains(".onContinuousHover"))
+        XCTAssertTrue(announcement.contains(".clickableCursor()"))
+
+        let displaySource = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
+        XCTAssertTrue(displaySource.contains("private let hoverState = AnnouncementHoverState()"))
+        XCTAssertTrue(displaySource.contains("AnnouncementView(announcement: announcement, hoverState: hoverState)"))
+        XCTAssertTrue(displaySource.contains("hostingView.onHoverChanged = { [weak hoverState] isHovered in"))
+        XCTAssertTrue(displaySource.contains("hoverState?.isHovered = isHovered"))
     }
 
     func testClickableCursorDefersReassertionUntilAfterAppKitCursorDispatch() throws {
@@ -1975,7 +2565,7 @@ final class NoturcodeCoreTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let source = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
-        let cursorStart = try XCTUnwrap(source.range(of: "private final class PointingHandCursorCoordinator"))
+        let cursorStart = try XCTUnwrap(source.range(of: "final class PointingHandCursorCoordinator"))
         let brandStart = try XCTUnwrap(source.range(of: "struct NoturcodeBrandMark"))
         let cursor = String(source[cursorStart.lowerBound..<brandStart.lowerBound])
 
@@ -2079,8 +2669,8 @@ final class NoturcodeCoreTests: XCTestCase {
 
         let surface = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/NotchSurfaceView.swift"))
         let headerStart = try XCTUnwrap(surface.range(of: "private struct AdaptiveDockHeader"))
-        let cacheStart = try XCTUnwrap(surface.range(of: "@MainActor\nprivate final class TerminalIconCache"))
-        let header = String(surface[headerStart.lowerBound..<cacheStart.lowerBound])
+        let surfaceAnnouncementStart = try XCTUnwrap(surface.range(of: "@MainActor\nfinal class AnnouncementHoverState"))
+        let header = String(surface[headerStart.lowerBound..<surfaceAnnouncementStart.lowerBound])
         XCTAssertEqual(header.components(separatedBy: ".clickableCursor()").count - 1, 1)
     }
 
@@ -2297,10 +2887,10 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(surface.contains("overflowChip(sessions: hiddenSessions, width: chipWidth)"))
         XCTAssertTrue(surface.contains("private func overflowState(for sessions: [TrackedSession]) -> SessionState"))
         XCTAssertTrue(surface.contains("SessionMarble(") && surface.contains("name: \"More sessions\""))
-        XCTAssertTrue(surface.contains("size: 20"))
+        XCTAssertTrue(surface.contains("size: 26"))
         XCTAssertTrue(surface.contains("animate: true"))
         XCTAssertTrue(surface.contains("Text(overflowState.displayName.lowercased())"))
-        XCTAssertTrue(surface.contains(".frame(width: width, height: 30, alignment: .leading)"))
+        XCTAssertTrue(surface.contains(".frame(width: width, height: 36, alignment: .leading)"))
         XCTAssertTrue(surface.contains("onShowAll: { state.expand() }"))
         XCTAssertTrue(coordinator.contains("func expand()"))
 
@@ -2308,12 +2898,21 @@ final class NoturcodeCoreTests: XCTestCase {
         let announcementStart = try XCTUnwrap(surface.range(of: "struct AnnouncementView"))
         let chip = String(surface[chipStart.lowerBound..<announcementStart.lowerBound])
         let padding = try XCTUnwrap(chip.range(of: ".padding(.horizontal, 7)"))
-        let measuredFrame = try XCTUnwrap(chip.range(of: ".frame(width: width, height: 30"))
+        let measuredFrame = try XCTUnwrap(chip.range(of: ".frame(width: width, height: 36"))
         XCTAssertLessThan(padding.lowerBound, measuredFrame.lowerBound)
+        XCTAssertTrue(coordinator.contains("min(118, max(70, ceil(CGFloat(name.count) * 5.7) + 52))"))
+        XCTAssertTrue(
+            coordinator.contains(": min(620, max(360, screen.frame.width))"),
+            "The external panel must fit four 118 pt slots without clipping either rounded edge."
+        )
+        XCTAssertTrue(
+            coordinator.contains("return max(min(420, envelopeWidth - 16), collapsedWidth(sessionNames: sessionNames))"),
+            "Hover must not make the wider external dock shrink."
+        )
         XCTAssertFalse(coordinator.contains("max(340"))
     }
 
-    func testDoneSummaryPopoverShowsOnlyAgentWrittenStatus() throws {
+    func testDoneSummaryIsPlainTextWithoutHoverPopover() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -2322,8 +2921,9 @@ final class NoturcodeCoreTests: XCTestCase {
         let coordinator = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/DisplayCoordinator.swift"))
 
         XCTAssertTrue(sessions.contains("lineLimit(2, reservesSpace: true)"))
-        XCTAssertTrue(sessions.contains(".popover(isPresented: $isPresented, arrowEdge: .trailing)"))
-        XCTAssertTrue(sessions.contains("accessibilityIdentifier(\"done-summary-popover-"))
+        XCTAssertFalse(sessions.contains("DoneSummaryPreview"))
+        XCTAssertFalse(sessions.contains("done-summary-popover-"))
+        XCTAssertFalse(sessions.contains("THIS RESPONSE"))
         XCTAssertFalse(sessions.contains("private var responseActivities"))
         XCTAssertFalse(sessions.contains("done-summary-steps-"))
         XCTAssertFalse(sessions.contains("Steps in this response"))
@@ -2332,6 +2932,46 @@ final class NoturcodeCoreTests: XCTestCase {
         XCTAssertTrue(sessions.contains("return \"Working on the current prompt\""))
         XCTAssertTrue(coordinator.contains("CGFloat(summaryCount) * 14"))
         XCTAssertTrue(coordinator.contains("$0.state.showsCompletionSummary"))
+    }
+
+    func testExpandedSessionRowUsesStateMotionAndCompactActionLayout() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sessions = try String(contentsOf: repository.appendingPathComponent("Sources/NoturcodeApp/SessionViews.swift"))
+        let rowStart = try XCTUnwrap(sessions.range(of: "private struct SessionRow: View"))
+        let rowEnd = try XCTUnwrap(sessions.range(of: "private struct ConversationSidebarToggle: View"))
+        let row = String(sessions[rowStart.lowerBound..<rowEnd.lowerBound])
+
+        XCTAssertTrue(row.contains("SessionMarble(session: session, size: 28, animate: true)"))
+        XCTAssertEqual(row.components(separatedBy: ".padding(.leading, 37)").count - 1, 3)
+        XCTAssertTrue(row.contains("private var remoteHost: String?"))
+        XCTAssertTrue(row.contains("session.terminal?.identity?.remoteHost"))
+        XCTAssertTrue(row.contains("if let remoteHost"))
+        XCTAssertTrue(row.contains("Text(\"SSH\")"))
+        XCTAssertTrue(row.contains("accessibilityLabel(\"Remote SSH session on \\(remoteHost)\")"))
+        XCTAssertTrue(row.contains("NodaConicGlow("))
+        XCTAssertTrue(row.contains("color: NSColor(red: 0.60, green: 1.0, blue: 0.22, alpha: 1)"))
+        XCTAssertTrue(row.contains("cornerRadius: 10"))
+        XCTAssertFalse(row.contains(".stroke(Color(red: 0.60, green: 1.0, blue: 0.22).opacity(0.78)"))
+        XCTAssertFalse(row.contains(".shadow(color: Color(red: 0.60, green: 1.0, blue: 0.22)"))
+        XCTAssertFalse(row.contains("animate: isHovered"))
+        XCTAssertTrue(row.contains("if session.state == .done"))
+        XCTAssertTrue(row.contains("Image(systemName: \"checkmark.circle.fill\")"))
+        XCTAssertEqual(row.components(separatedBy: "if session.state == .done").count - 1, 2)
+        XCTAssertTrue(row.contains(".font(.system(size: 12, weight: .semibold))"))
+        XCTAssertTrue(row.contains("if session.state == .done {\n                        TimelineView"))
+        XCTAssertTrue(row.contains("} else if session.state == .askingYou || session.state == .failed {"))
+        XCTAssertTrue(row.contains("private var actionableNeed: String?"))
+        XCTAssertTrue(row.contains("if let actionableNeed"))
+        XCTAssertFalse(row.contains("Text(\"\\(session.state.displayName) ·"))
+
+        let disconnect = try XCTUnwrap(row.range(of: "accessibilityIdentifier(\"disconnect-noturcode-"))
+        let summary = try XCTUnwrap(row.range(of: "if let summary = structuredSummary"))
+        let viewChat = try XCTUnwrap(row.range(of: "accessibilityIdentifier(\"view-terminal-"))
+        XCTAssertLessThan(disconnect.lowerBound, summary.lowerBound)
+        XCTAssertGreaterThan(viewChat.lowerBound, summary.lowerBound)
     }
 
     func testDesktopAppUsesConversationFirstShellInsteadOfEmbeddingFloatingCardChrome() throws {

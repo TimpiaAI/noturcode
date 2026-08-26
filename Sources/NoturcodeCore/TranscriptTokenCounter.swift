@@ -3,6 +3,12 @@ import Foundation
 public enum TranscriptTokenCounter {
     public static func count(source: AgentSource, path: String, fromOffset: UInt64 = 0) -> Int? {
         let expandedPath = (path as NSString).expandingTildeInPath
+        if source == .pi || source == .omp {
+            guard let data = try? Data(contentsOf: URL(fileURLWithPath: expandedPath), options: [.mappedIfSafe]) else {
+                return nil
+            }
+            return PiFamilyTranscriptParser.parse(data: data, limit: 1).totalTokens
+        }
         guard let handle = FileHandle(forReadingAtPath: expandedPath) else { return nil }
         defer { try? handle.close() }
 
@@ -18,7 +24,7 @@ public enum TranscriptTokenCounter {
                 start = min(fromOffset, end)
             case .codex:
                 start = end > 2_000_000 ? end - 2_000_000 : 0
-            case .gemini, .opencode, .grok, .harness:
+            case .gemini, .pi, .omp, .hermes, .opencode, .grok, .harness:
                 return nil
             }
             try handle.seek(toOffset: start)
@@ -46,7 +52,7 @@ public enum TranscriptTokenCounter {
                     if let total = value.value(at: ["payload", "info", "total_token_usage", "total_tokens"])?.intValue {
                         codexTotal = total
                     }
-                case .gemini, .opencode, .grok, .harness:
+                case .gemini, .pi, .omp, .hermes, .opencode, .grok, .harness:
                     return
                 }
         }
@@ -68,7 +74,7 @@ public enum TranscriptTokenCounter {
         switch source {
         case .claude: return claudeTotal > 0 ? claudeTotal : nil
         case .codex: return codexTotal
-        case .gemini, .opencode, .grok, .harness: return nil
+        case .gemini, .pi, .omp, .hermes, .opencode, .grok, .harness: return nil
         }
     }
 

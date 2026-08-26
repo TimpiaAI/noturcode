@@ -37,7 +37,8 @@ actor AgentTranscriptReader {
         do {
             let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             let fileSize = UInt64(max(0, values.fileSize ?? 0))
-            if let cached = cachedEntry(for: session.key),
+            if session.key.source != .hermes,
+               let cached = cachedEntry(for: session.key),
                cached.url == url,
                cached.byteOffset == fileSize,
                cached.modificationDate == values.contentModificationDate {
@@ -46,6 +47,17 @@ actor AgentTranscriptReader {
 
             if session.key.source == .opencode, isOpenCodeDatabase(url) {
                 let entries = try readOpenCodeDatabase(at: url, sessionID: session.key.sessionID)
+                store(CacheEntry(
+                    url: url,
+                    modificationDate: values.contentModificationDate,
+                    byteOffset: fileSize,
+                    rollingData: Data(),
+                    entries: entries
+                ), for: session.key)
+                return .found(entries)
+            }
+            if session.key.source == .hermes, isHermesDatabase(url) {
+                let entries = try readHermesDatabase(at: url, sessionID: session.key.sessionID)
                 store(CacheEntry(
                     url: url,
                     modificationDate: values.contentModificationDate,
@@ -180,6 +192,12 @@ actor AgentTranscriptReader {
             findCodexTranscript(sessionID: session.key.sessionID)
         case .gemini:
             findGeminiTranscript(sessionID: session.key.sessionID)
+        case .pi:
+            findPiFamilyTranscript(sessionID: session.key.sessionID, source: .pi)
+        case .omp:
+            findPiFamilyTranscript(sessionID: session.key.sessionID, source: .omp)
+        case .hermes:
+            findHermesDatabase(sessionID: session.key.sessionID)
         case .opencode:
             findOpenCodeDatabase(sessionID: session.key.sessionID)
         case .grok:
@@ -266,6 +284,30 @@ actor AgentTranscriptReader {
             let data = (try? handle.read(upToCount: 32_768)) ?? Data()
             let head = String(decoding: data, as: UTF8.self)
             if needles.contains(where: head.contains) { return url }
+        }
+        return nil
+    }
+
+    private func findPiFamilyTranscript(sessionID: String, source: AgentSource) -> URL? {
+        let relativeRoot = source == .omp ? ".omp/agent/sessions" : ".pi/agent/sessions"
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(relativeRoot, isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return nil }
+        var candidates: [(url: URL, modified: Date)] = []
+        for case let url as URL in enumerator where url.pathExtension.lowercased() == "jsonl" {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard values?.isRegularFile == true else { continue }
+            candidates.append((url, values?.contentModificationDate ?? .distantPast))
+        }
+        let needles = ["\"id\":\"\(sessionID)\"", "\"id\": \"\(sessionID)\""]
+        for candidate in candidates.sorted(by: { $0.modified > $1.modified }).prefix(240) {
+            guard let data = try? headData(at: candidate.url, maximumBytes: 4_096) else { continue }
+            let head = String(decoding: data, as: UTF8.self)
+            if needles.contains(where: head.contains) { return candidate.url }
         }
         return nil
     }
@@ -368,6 +410,38 @@ actor AgentTranscriptReader {
 
     private func isOpenCodeDatabase(_ url: URL) -> Bool {
         url.lastPathComponent.caseInsensitiveCompare("opencode.db") == .orderedSame
+    }
+
+    private func findHermesDatabase(sessionID: String) -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        var candidates = [home.appendingPathComponent(".hermes/state.db")]
+        let profiles = home.appendingPathComponent(".hermes/profiles", isDirectory: true)
+        if let profileDirectories = try? FileManager.default.contentsOfDirectory(
+            at: profiles,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) {
+            candidates.append(contentsOf: profileDirectories.map { $0.appendingPathComponent("state.db") })
+        }
+        for url in candidates where FileManager.default.isReadableFile(atPath: url.path) {
+            if hermesDatabaseContainsSession(at: url, sessionID: sessionID) { return url }
+        }
+        return nil
+    }
+
+    private func isHermesDatabase(_ url: URL) -> Bool {
+        url.lastPathComponent.caseInsensitiveCompare("state.db") == .orderedSame
+    }
+
+    private func hermesDatabaseContainsSession(at url: URL, sessionID: String) -> Bool {
+        guard let data = try? runSQLite(
+            database: url,
+            query: "SELECT id FROM sessions WHERE id = \(sqlLiteral(sessionID)) LIMIT 1;"
+        ),
+              let rows = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return false
+        }
+        return !rows.isEmpty
     }
 
     private func jsonlContainsSessionID(at url: URL, sessionID: String) -> Bool {
@@ -678,6 +752,27 @@ actor AgentTranscriptReader {
         if let name = update["toolName"] as? String { entries[index].title = name }
     }
 
+    private func readHermesDatabase(at url: URL, sessionID: String) throws -> [ChatTranscriptEntry] {
+        let query = """
+        SELECT m.id AS message_id, m.role, m.content, m.tool_call_id,
+               m.tool_calls, m.tool_name, m.timestamp, m.finish_reason,
+               s.model, s.billing_provider AS provider
+        FROM (
+            SELECT id, session_id, role, content, tool_call_id, tool_calls,
+                   tool_name, timestamp, finish_reason
+            FROM messages
+            WHERE session_id = \(sqlLiteral(sessionID))
+              AND COALESCE(active, 1) = 1
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 400
+        ) AS m
+        JOIN sessions AS s ON s.id = m.session_id
+        ORDER BY m.timestamp, m.id;
+        """
+        let rows = try runSQLite(database: url, query: query)
+        return HermesTranscriptParser.parse(databaseRows: rows, limit: 160)
+    }
+
     private func readOpenCodeDatabase(at url: URL, sessionID: String) throws -> [ChatTranscriptEntry] {
         let query = """
         SELECT m.id AS message_id, m.time_created AS message_time, m.data AS message_data,
@@ -710,8 +805,11 @@ actor AgentTranscriptReader {
         for messageID in messageOrder {
             guard let message = messages[messageID] else { continue }
             let role = (message["role"] as? String)?.lowercased() ?? "assistant"
-            let model = (message["modelID"] as? String)
+            let modelID = (message["modelID"] as? String)
                 ?? ((message["model"] as? [String: Any])?["modelID"] as? String)
+            let providerID = (message["providerID"] as? String)
+                ?? ((message["model"] as? [String: Any])?["providerID"] as? String)
+            let model = Self.qualifiedModel(provider: providerID, model: modelID)
             var textParts: [String] = []
             for part in parts[messageID] ?? [] {
                 let type = (part["type"] as? String)?.lowercased() ?? ""
@@ -842,6 +940,12 @@ actor AgentTranscriptReader {
         if let number = value as? NSNumber { return Date(timeIntervalSince1970: number.doubleValue / 1_000) }
         if let string = value as? String, let number = Double(string) { return Date(timeIntervalSince1970: number / 1_000) }
         return nil
+    }
+
+    private static func qualifiedModel(provider: String?, model: String?) -> String? {
+        guard let model, !model.isEmpty else { return nil }
+        guard let provider, !provider.isEmpty, !model.hasPrefix(provider + "/") else { return model }
+        return "\(provider)/\(model)"
     }
 
     private func stableProviderID(_ value: String) -> String {

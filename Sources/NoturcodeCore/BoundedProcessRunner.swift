@@ -39,11 +39,13 @@ public enum BoundedProcessRunner {
         executable: String,
         arguments: [String],
         standardInputURL: URL? = nil,
+        environment: [String: String]? = nil,
         timeout: TimeInterval
     ) throws -> BoundedProcessResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        process.environment = environment
         let inputHandle = try standardInputURL.map { try FileHandle(forReadingFrom: $0) }
         process.standardInput = inputHandle ?? FileHandle.nullDevice
         defer { try? inputHandle?.close() }

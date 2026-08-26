@@ -4,7 +4,7 @@ Noturcode has three small layers.
 
 ## 1. Harness integrations
 
-Claude Code, Codex, Gemini CLI, and OpenCode integrations normalize lifecycle events into a shared `BridgeEvent` model. Hook commands must fail open: the harness continues even when the app is not running.
+Claude Code, Codex, Gemini CLI, Pi, OMP, Hermes Agent, and OpenCode integrations normalize lifecycle events into a shared `BridgeEvent` model. Hook and extension commands must fail open. The harness continues when the app is not running.
 
 The integration installer merges only Noturcode-owned handlers, preserves unrelated handlers, writes dated backups, and supports removal without stopping an agent session.
 
@@ -12,7 +12,7 @@ The integration installer merges only Noturcode-owned handlers, preserves unrela
 
 `noturcode-bridge` is a universal command-line executable installed under the user's Application Support directory. It validates hook payloads, redacts sensitive command arguments, and sends bounded events over a user-only Unix-domain socket.
 
-The native process keeps disposable session state in a JSON file. It does not proxy model traffic and does not maintain a cloud service.
+The native process keeps disposable session state in a JSON file. Harness identity stays separate from provider, model, theme, and agent role. Hermes conversation rows stay in Hermes `state.db`; Noturcode opens it read-only. The app does not proxy model traffic and does not maintain a cloud service.
 
 For a paired VPS, `nc ssh` opens an ordinary interactive SSH shell with a per-shell Unix-socket reverse forward. The remote Python helper sends authenticated hook payloads through that socket. The Mac normalizes the payload with the same `HookNormalizer` used by local integrations. No TCP listener or public service is created.
 

@@ -60,7 +60,6 @@ final class SessionProcessMonitor {
 
     nonisolated private static func processLooksLikeAgent(_ pid: Int32) -> Bool {
         guard let ancestor = ProcessAncestry.inspect(pid: pid) else { return false }
-        let name = URL(fileURLWithPath: ancestor.command).lastPathComponent.lowercased()
-        return name.contains("codex") || name.contains("claude") || name == "node" || name == "bun"
+        return ProcessAncestry.isAgentProcess(ancestor.command)
     }
 }

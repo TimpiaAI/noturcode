@@ -1,0 +1,16 @@
+name: noturcode
+version: "1.0.0"
+description: "Report local Hermes Agent session state to the Noturcode macOS app. Sends metadata only; conversation content stays in Hermes state.db."
+author: Noturcode
+hooks:
+  - on_session_start
+  - pre_llm_call
+  - post_llm_call
+  - pre_api_request
+  - pre_tool_call
+  - post_tool_call
+  - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - subagent_start
+  - subagent_stop

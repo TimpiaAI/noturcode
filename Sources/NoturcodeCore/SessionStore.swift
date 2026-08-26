@@ -43,11 +43,30 @@ public final class SessionStore: ObservableObject {
     public var transitionHandler: ((SessionTransition) -> Void)?
     private let persistence: SessionPersistence
     private let persistenceDebouncer: SessionPersistenceDebouncer
+    private var ignoredSessionKeys: Set<SessionKey> = []
 
-    public init(persistence: SessionPersistence = SessionPersistence()) {
+    public init(
+        persistence: SessionPersistence = SessionPersistence(),
+        recoveredRemoteSessions: [TrackedSession] = []
+    ) {
         self.persistence = persistence
         self.persistenceDebouncer = SessionPersistenceDebouncer(persistence: persistence)
-        self.sessions = persistence.load()
+        let persisted = persistence.load()
+            // A persisted terminal card is useful only while its owning
+            // process or native connection can be checked. Do not resurrect
+            // old idle cards after a restart without a live owner.
+            .filter { $0.sourceProcessID != nil || $0.nativeSession != nil }
+        var merged = Dictionary(uniqueKeysWithValues: persisted.map { ($0.key, $0) })
+        for recovered in recoveredRemoteSessions
+            where recovered.terminal?.identity?.remoteHost?.isEmpty == false {
+            if var current = merged[recovered.key], current.lastPromptAt > recovered.lastPromptAt {
+                current.terminal = recovered.terminal
+                merged[recovered.key] = current
+            } else {
+                merged[recovered.key] = recovered
+            }
+        }
+        self.sessions = merged.values
             .map(Self.pruningSubagents)
             .sorted { $0.lastPromptAt > $1.lastPromptAt }
     }
@@ -55,25 +74,72 @@ public final class SessionStore: ObservableObject {
     @discardableResult
     public func apply(_ event: BridgeEvent) -> SessionTransition? {
         let key = event.key
-        let index = sessions.firstIndex { $0.key == key }
+        var index = sessions.firstIndex { $0.key == key }
         let old = index.map { sessions[$0] }
+
+        // A resumed harness can omit or lose its first SessionStart hook. Recover from the
+        // next top-level event when nc supplied a real terminal target. Events without a
+        // target still cannot create cards, and an explicit disconnect remains final.
+        let canRecoverMissingStart: Bool
+        switch event.kind {
+        case .promptSubmitted, .activityStarted, .activityFinished, .askingYou,
+             .responseCompleted, .turnInterrupted, .failed:
+            canRecoverMissingStart = true
+        default:
+            canRecoverMissingStart = false
+        }
+        if index == nil,
+           canRecoverMissingStart,
+           !ignoredSessionKeys.contains(key),
+           event.terminalSessionID?.isEmpty == false || event.nativeSession != nil {
+            let terminal = event.terminalSessionID.map { TerminalTarget(sessionID: $0) }
+            let name = Self.normalizedSessionName(event.name)
+                ?? Self.inferredSessionName(cwd: event.cwd, source: event.source)
+            upsert(TrackedSession(
+                key: key,
+                name: name,
+                terminal: terminal,
+                nativeSession: event.nativeSession,
+                sourceProcessID: event.sourceProcessID,
+                cwd: event.cwd,
+                transcriptPath: event.transcriptPath,
+                provider: event.provider,
+                model: event.model,
+                theme: event.theme,
+                agentRole: event.agentRole,
+                state: .idle,
+                connectedAt: event.timestamp,
+                lastPromptAt: event.timestamp,
+                stateChangedAt: event.timestamp
+            ))
+            index = sessions.firstIndex { $0.key == key }
+        }
 
         switch event.kind {
         case .connect:
-            guard let name = Self.normalizedSessionName(event.name) else { return nil }
+            guard let incomingName = Self.normalizedSessionName(event.name) else { return nil }
+            // Provider session updates must not replace a stable card name. Pi, OMP, and
+            // OpenCode report name and model metadata more than once per live session.
+            let preservesExistingName = event.source == .opencode || event.source == .pi || event.source == .omp
+            let name = preservesExistingName ? (old?.name ?? incomingName) : incomingName
             let terminal = event.terminalSessionID
                 .flatMap { $0.isEmpty ? nil : TerminalTarget(sessionID: $0) }
                 ?? old?.terminal
             let nativeSession = event.nativeSession ?? old?.nativeSession
             guard terminal != nil || nativeSession != nil else { return nil }
+            ignoredSessionKeys.remove(key)
             let session = TrackedSession(
                 key: key,
                 name: name,
                 terminal: terminal,
                 nativeSession: nativeSession,
                 sourceProcessID: event.sourceProcessID,
-                cwd: event.cwd,
+                cwd: event.cwd ?? old?.cwd,
                 transcriptPath: event.transcriptPath ?? old?.transcriptPath,
+                provider: event.provider ?? old?.provider,
+                model: event.model ?? old?.model,
+                theme: event.theme ?? old?.theme,
+                agentRole: event.agentRole ?? old?.agentRole,
                 state: old?.state ?? .idle,
                 connectedAt: old?.connectedAt ?? event.timestamp,
                 lastPromptAt: old?.lastPromptAt ?? event.timestamp,
@@ -87,19 +153,33 @@ public final class SessionStore: ObservableObject {
             )
             upsert(session)
 
+        case .metadataUpdated:
+            guard var session = session(at: index) else { return nil }
+            session.name = Self.normalizedSessionName(event.name) ?? session.name
+            session.cwd = event.cwd ?? session.cwd
+            session.transcriptPath = event.transcriptPath ?? session.transcriptPath
+            session.provider = event.provider ?? session.provider
+            session.model = event.model ?? session.model
+            session.theme = event.theme ?? session.theme
+            session.agentRole = event.agentRole ?? session.agentRole
+            session.sourceProcessID = event.sourceProcessID ?? session.sourceProcessID
+            upsert(session)
+
         case .disconnect:
+            ignoredSessionKeys.insert(key)
             guard let index else { return nil }
             sessions.remove(at: index)
 
         case .sessionEnded:
-            guard var session = session(at: index) else { return nil }
-            changeState(&session, to: .idle, at: event.timestamp)
-            session.sourceProcessID = nil
-            session.currentActivity = nil
-            session.activityStartedAt = nil
-            upsert(session)
+            // A harness SessionEnd or an exited agent process means this
+            // conversation is no longer live. Keep it out of the pill and
+            // block late hook events until the user explicitly reconnects.
+            ignoredSessionKeys.insert(key)
+            guard let index else { return nil }
+            sessions.remove(at: index)
 
         case .sessionStarted:
+            guard !ignoredSessionKeys.contains(key) else { return nil }
             guard var session = session(at: index) else {
                 let terminal = event.terminalSessionID
                     .flatMap { $0.isEmpty ? nil : TerminalTarget(sessionID: $0) }
@@ -114,6 +194,10 @@ public final class SessionStore: ObservableObject {
                     sourceProcessID: event.sourceProcessID,
                     cwd: event.cwd,
                     transcriptPath: event.transcriptPath,
+                    provider: event.provider,
+                    model: event.model,
+                    theme: event.theme,
+                    agentRole: event.agentRole,
                     state: .idle,
                     connectedAt: event.timestamp,
                     lastPromptAt: event.timestamp,
@@ -124,6 +208,10 @@ public final class SessionStore: ObservableObject {
             }
             session.sourceProcessID = event.sourceProcessID ?? session.sourceProcessID
             session.transcriptPath = event.transcriptPath ?? session.transcriptPath
+            session.provider = event.provider ?? session.provider
+            session.model = event.model ?? session.model
+            session.theme = event.theme ?? session.theme
+            session.agentRole = event.agentRole ?? session.agentRole
             session.name = Self.normalizedSessionName(event.name) ?? session.name
             if let terminal = event.terminalSessionID, !terminal.isEmpty {
                 session.terminal = TerminalTarget(sessionID: terminal)
@@ -169,9 +257,19 @@ public final class SessionStore: ObservableObject {
 
         case .responseCompleted:
             guard var session = session(at: index) else { return nil }
-            changeState(&session, to: .done, at: event.timestamp)
+            // OpenCode keeps the interactive session alive after it reports completion. Older
+            // installed plugins call this responseCompleted; keep those live sessions idle too.
+            let completedState: SessionState = event.source == .opencode ? .idle : .done
+            changeState(&session, to: completedState, at: event.timestamp)
             session.lastAgentMessage = event.message ?? session.lastAgentMessage
             session.transcriptPath = event.transcriptPath ?? session.transcriptPath
+            session.currentActivity = nil
+            session.activityStartedAt = nil
+            upsert(session)
+
+        case .turnInterrupted:
+            guard var session = session(at: index) else { return nil }
+            changeState(&session, to: .idle, at: event.timestamp)
             session.currentActivity = nil
             session.activityStartedAt = nil
             upsert(session)
@@ -220,6 +318,14 @@ public final class SessionStore: ObservableObject {
             upsert(session)
         }
 
+        if let metadataIndex = sessions.firstIndex(where: { $0.key == key }),
+           event.provider != nil || event.model != nil || event.theme != nil || event.agentRole != nil {
+            sessions[metadataIndex].provider = event.provider ?? sessions[metadataIndex].provider
+            sessions[metadataIndex].model = event.model ?? sessions[metadataIndex].model
+            sessions[metadataIndex].theme = event.theme ?? sessions[metadataIndex].theme
+            sessions[metadataIndex].agentRole = event.agentRole ?? sessions[metadataIndex].agentRole
+        }
+
         if let sessionTokens = event.sessionTokens,
            let tokenIndex = sessions.firstIndex(where: { $0.key == key }) {
             let nextTokens = max(sessions[tokenIndex].tokens ?? 0, sessionTokens)
@@ -247,10 +353,23 @@ public final class SessionStore: ObservableObject {
     }
 
     public func remove(_ key: SessionKey, staleMessage: String? = nil) {
+        ignoredSessionKeys.insert(key)
         guard let index = sessions.firstIndex(where: { $0.key == key }) else { return }
         sessions.remove(at: index)
         lastStaleTargetMessage = staleMessage
         persistenceDebouncer.saveNow(sessions)
+    }
+
+    @discardableResult
+    public func rename(_ key: SessionKey, to rawName: String) -> Bool {
+        guard let name = Self.normalizedSessionName(rawName),
+              let index = sessions.firstIndex(where: { $0.key == key }),
+              sessions[index].name != name else { return false }
+        var session = sessions[index]
+        session.name = name
+        upsert(session)
+        persistenceDebouncer.saveNow(sessions)
+        return true
     }
 
     public func clearStaleMessage() {

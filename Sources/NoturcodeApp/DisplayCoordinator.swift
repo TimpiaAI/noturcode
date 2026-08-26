@@ -82,12 +82,12 @@ struct NotchMetrics: Equatable, Sendable {
         screenFrame = screen.frame
         envelopeWidth = hasHardwareNotch
             ? min(820, max(520, screen.frame.width - 80))
-            : min(540, max(360, screen.frame.width))
+            : min(620, max(360, screen.frame.width))
         envelopeHeight = min(570, max(300, screen.frame.height))
     }
 
     func sessionChipWidth(for name: String) -> CGFloat {
-        min(108, max(62, ceil(CGFloat(name.count) * 5.7) + 46))
+        min(118, max(70, ceil(CGFloat(name.count) * 5.7) + 52))
     }
 
     func collapsedWidth(sessionNames: [String]) -> CGFloat {
@@ -98,22 +98,28 @@ struct NotchMetrics: Equatable, Sendable {
         let fixedContent: CGFloat = 28 + 19 + 16 + 1
         let contentWidth = fixedContent + chipWidths + chipSpacing
         if hasHardwareNotch {
-            let wingMinimum = neckWidth + 2 * (widestChip + 34)
-            return min(envelopeWidth - 12, max(wingMinimum, contentWidth + neckWidth + 24))
+            let primaryChipWidth = sessionNames.first.map(sessionChipWidth(for:)) ?? 62
+            let hardwareOverflowWidth: CGFloat = 78
+            let leftWingWidth = primaryChipWidth + 36
+            let rightWingWidth = sessionNames.count > 1 ? hardwareOverflowWidth : 0
+            let fusedWidth = neckWidth + 2 * max(leftWingWidth, rightWingWidth) + 28
+            return min(envelopeWidth - 12, fusedWidth)
         }
         return min(envelopeWidth - 12, max(120, contentWidth))
     }
 
     func expandedSurfaceWidth(sessionNames: [String]) -> CGFloat {
         if hasHardwareNotch {
-            return max(min(420, envelopeWidth - 16), collapsedWidth(sessionNames: sessionNames))
+            let expandedTarget = min(640, envelopeWidth - 16)
+            return max(expandedTarget, collapsedWidth(sessionNames: sessionNames))
         }
-        return min(420, envelopeWidth - 16)
+        return max(min(420, envelopeWidth - 16), collapsedWidth(sessionNames: sessionNames))
     }
 
     func expandedHeight(sessionCount: Int) -> CGFloat {
         let topInset = hasHardwareNotch ? neckHeight + 18 : 18
-        return min(520, max(180, topInset + CGFloat(sessionCount) * 92 + 12))
+        // + 42 reserves the workspace-button footer row under the session list.
+        return min(520, max(180, topInset + CGFloat(sessionCount) * 92 + 42))
     }
 
     func expandedSurfaceHeight(sessionCount: Int, activityAdjustment: CGFloat) -> CGFloat {
@@ -137,6 +143,7 @@ final class DisplayCoordinator {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var mouseCoalescer: MouseLocationCoalescer?
+    private var recentAppsCoordinator: RecentAppsCoordinator?
 
     init(model: AppModel) {
         self.model = model
@@ -144,6 +151,9 @@ final class DisplayCoordinator {
 
     func start() {
         refreshScreens()
+        let recentAppsCoordinator = RecentAppsCoordinator()
+        self.recentAppsCoordinator = recentAppsCoordinator
+        recentAppsCoordinator.start()
         if let model {
             let announcementPanel = AttentionAnnouncementPanelController { [weak model] sessionKey in
                 guard let model,
@@ -189,6 +199,8 @@ final class DisplayCoordinator {
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         globalMouseMonitor = nil
         mouseCoalescer = nil
+        recentAppsCoordinator?.stop()
+        recentAppsCoordinator = nil
         announcementCancellable?.cancel()
         announcementCancellable = nil
         announcementPanel?.close()
@@ -248,6 +260,7 @@ final class DisplayCoordinator {
 private final class AttentionAnnouncementPanelController {
     private let panel: NSPanel
     private let hostingView: AnnouncementHostingView
+    private let hoverState = AnnouncementHoverState()
     private let onSelect: (SessionKey) -> Void
     private var presentedID: UUID?
     private let size = CGSize(width: 408, height: 106)
@@ -261,6 +274,9 @@ private final class AttentionAnnouncementPanelController {
             defer: false
         )
         hostingView = AnnouncementHostingView(rootView: AnyView(EmptyView()))
+        hostingView.onHoverChanged = { [weak hoverState] isHovered in
+            hoverState?.isHovered = isHovered
+        }
         panel.contentView = hostingView
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -269,11 +285,13 @@ private final class AttentionAnnouncementPanelController {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
+        panel.acceptsMouseMovedEvents = true
     }
 
     func present(_ announcement: AttentionAnnouncement?, cursor: CGPoint) {
         guard let announcement else {
             presentedID = nil
+            hoverState.isHovered = false
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.14
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -291,7 +309,7 @@ private final class AttentionAnnouncementPanelController {
             self?.onSelect(announcement.sessionKey)
         }
         hostingView.rootView = AnyView(
-            AnnouncementView(announcement: announcement)
+            AnnouncementView(announcement: announcement, hoverState: hoverState)
                 .frame(width: size.width, height: size.height)
         )
         guard presentedID != announcement.id else { return }
@@ -318,6 +336,8 @@ private final class AttentionAnnouncementPanelController {
         panel.setFrame(entranceFrame, display: false)
         panel.alphaValue = 0
         panel.orderFrontRegardless()
+        panel.enableCursorRects()
+        panel.resetCursorRects()
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             panel.setFrame(finalFrame, display: true)
             NSAnimationContext.runAnimationGroup { context in
@@ -363,9 +383,7 @@ final class NotchPresentationState: ObservableObject {
     let isUITestRapidHover: Bool
 
     private var isArmed = true
-    private var pointerInside = false
     private let isUITestForcedExpanded: Bool
-    private var dwellTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private var hoverClearTask: Task<Void, Never>?
 
@@ -380,28 +398,18 @@ final class NotchPresentationState: ObservableObject {
 
     func pointerMoved(inside: Bool) {
         guard !isUITestForcedExpanded else { return }
-        pointerInside = inside
         if inside {
             exitTask?.cancel()
             exitTask = nil
-            guard !isExpanded, isArmed, dwellTask == nil else { return }
-            dwellTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .milliseconds(70))
-                } catch {
-                    return
-                }
-                guard let self, self.pointerInside, self.isArmed else { return }
-                self.isExpanded = true
-                self.dwellTask = nil
-            }
+            guard !isExpanded, isArmed else { return }
+            // Start the spring on the first hover event. A separate dwell made
+            // the built-in notch feel stuck even when rendering was idle.
+            isExpanded = true
         } else {
-            dwellTask?.cancel()
-            dwellTask = nil
             if isExpanded, exitTask == nil {
                 exitTask = Task { [weak self] in
                     do {
-                        try await Task.sleep(for: .milliseconds(140))
+                        try await Task.sleep(for: .milliseconds(60))
                     } catch {
                         return
                     }
@@ -434,8 +442,6 @@ final class NotchPresentationState: ObservableObject {
     }
 
     func expand() {
-        dwellTask?.cancel()
-        dwellTask = nil
         exitTask?.cancel()
         exitTask = nil
         isExpanded = true
@@ -453,7 +459,6 @@ final class NotchPresentationState: ObservableObject {
 
     func select(_ session: TrackedSession, action: @escaping @MainActor () -> Void) {
         pressedSessionID = session.id
-        dwellTask?.cancel()
         exitTask?.cancel()
         collapseAndLatch()
         // UI fixtures must never activate or manipulate a real terminal window.
@@ -475,8 +480,6 @@ final class NotchPresentationState: ObservableObject {
     }
 
     private func collapseAndLatch() {
-        dwellTask?.cancel()
-        dwellTask = nil
         exitTask?.cancel()
         exitTask = nil
         hoverClearTask?.cancel()
@@ -617,6 +620,9 @@ final class NotchPanelController {
 @MainActor
 private final class AnnouncementHostingView: NSHostingView<AnyView> {
     var onClick: (() -> Void)?
+    var onHoverChanged: ((Bool) -> Void)?
+    private let cursorRegionID = UUID()
+    private var cursorTrackingArea: NSTrackingArea?
 
     required init(rootView: AnyView) {
         super.init(rootView: rootView)
@@ -638,6 +644,42 @@ private final class AnnouncementHostingView: NSHostingView<AnyView> {
     override func resetCursorRects() {
         super.resetCursorRects()
         addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.activeAlways, .inVisibleRect, .mouseEnteredAndExited, .mouseMoved],
+            owner: self
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChanged?(true)
+        PointingHandCursorCoordinator.shared.setActive(true, regionID: cursorRegionID)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        PointingHandCursorCoordinator.shared.refreshPointingHandIfActive()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChanged?(false)
+        PointingHandCursorCoordinator.shared.setActive(false, regionID: cursorRegionID)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil {
+            onHoverChanged?(false)
+            PointingHandCursorCoordinator.shared.setActive(false, regionID: cursorRegionID)
+        }
+        super.viewWillMove(toWindow: newWindow)
     }
 
     @objc private func handleClick() {

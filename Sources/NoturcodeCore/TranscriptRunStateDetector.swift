@@ -10,6 +10,12 @@ public struct TranscriptFileRevision: Equatable, Sendable {
     }
 }
 
+public enum TranscriptTurnState: Equatable, Sendable {
+    case active
+    case completed
+    case interrupted
+}
+
 public enum TranscriptRunStateDetector {
     public static func revision(atPath path: String) -> TranscriptFileRevision? {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
@@ -28,17 +34,65 @@ public enum TranscriptRunStateDetector {
         after lastPromptAt: Date,
         maximumBytes: Int = 256 * 1_024
     ) -> Bool {
-        guard source == .claude else { return false }
-        guard let data = tailData(atPath: path, maximumBytes: maximumBytes) else { return false }
-        return turnCompleted(data: data, source: source, after: lastPromptAt)
+        turnState(atPath: path, source: source, after: lastPromptAt, maximumBytes: maximumBytes) == .completed
     }
 
     public static func turnCompleted(data: Data, source: AgentSource, after lastPromptAt: Date) -> Bool {
-        guard source == .claude else { return false }
+        turnState(data: data, source: source, after: lastPromptAt) == .completed
+    }
+
+    public static func turnState(
+        atPath path: String,
+        source: AgentSource,
+        after lastPromptAt: Date,
+        maximumBytes: Int = 256 * 1_024
+    ) -> TranscriptTurnState {
+        guard source == .claude || source == .codex || source == .pi || source == .omp,
+              let data = tailData(atPath: path, maximumBytes: maximumBytes) else { return .active }
+        return turnState(data: data, source: source, after: lastPromptAt)
+    }
+
+    public static func turnState(
+        data: Data,
+        source: AgentSource,
+        after lastPromptAt: Date
+    ) -> TranscriptTurnState {
         let fractionalTimestampFormatter = ISO8601DateFormatter()
         fractionalTimestampFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let wholeTimestampFormatter = ISO8601DateFormatter()
 
+        switch source {
+        case .claude:
+            return claudeTurnState(
+                data: data,
+                after: lastPromptAt,
+                fractional: fractionalTimestampFormatter,
+                whole: wholeTimestampFormatter
+            )
+        case .codex:
+            return codexTurnState(
+                data: data,
+                after: lastPromptAt,
+                fractional: fractionalTimestampFormatter,
+                whole: wholeTimestampFormatter
+            )
+        case .pi, .omp:
+            return PiFamilyTranscriptParser.parse(
+                data: data,
+                limit: 1,
+                after: lastPromptAt
+            ).turnState
+        default:
+            return .active
+        }
+    }
+
+    private static func claudeTurnState(
+        data: Data,
+        after lastPromptAt: Date,
+        fractional: ISO8601DateFormatter,
+        whole: ISO8601DateFormatter
+    ) -> TranscriptTurnState {
         for line in String(decoding: data, as: UTF8.self).split(separator: "\n").reversed() {
             guard let lineData = String(line).data(using: .utf8),
                   let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
@@ -46,21 +100,49 @@ public enum TranscriptRunStateDetector {
                   type == "user" || type == "assistant",
                   let timestamp = timestamp(
                     object["timestamp"],
-                    fractional: fractionalTimestampFormatter,
-                    whole: wholeTimestampFormatter
+                    fractional: fractional,
+                    whole: whole
                   ) else { continue }
 
-            guard timestamp >= lastPromptAt else { return false }
+            guard timestamp >= lastPromptAt else { return .active }
 
             if type == "user" {
-                return false
+                return .active
             }
             guard type == "assistant",
                   let message = object["message"] as? [String: Any],
                   let stopReason = message["stop_reason"] as? String else { continue }
-            return stopReason == "end_turn"
+            return stopReason == "end_turn" ? .completed : .active
         }
-        return false
+        return .active
+    }
+
+    private static func codexTurnState(
+        data: Data,
+        after lastPromptAt: Date,
+        fractional: ISO8601DateFormatter,
+        whole: ISO8601DateFormatter
+    ) -> TranscriptTurnState {
+        for line in String(decoding: data, as: UTF8.self).split(separator: "\n").reversed() {
+            guard let lineData = String(line).data(using: .utf8),
+                  let object = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+                  let timestamp = timestamp(
+                    object["timestamp"],
+                    fractional: fractional,
+                    whole: whole
+                  ) else { continue }
+            guard timestamp >= lastPromptAt else { return .active }
+            guard object["type"] as? String == "event_msg",
+                  let payload = object["payload"] as? [String: Any],
+                  let eventType = payload["type"] as? String else { continue }
+            switch eventType {
+            case "task_complete": return .completed
+            case "turn_aborted": return .interrupted
+            case "task_started": return .active
+            default: continue
+            }
+        }
+        return .active
     }
 
     private static func tailData(atPath path: String, maximumBytes: Int) -> Data? {

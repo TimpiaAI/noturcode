@@ -4,7 +4,7 @@ import NoturcodeCore
 import UniformTypeIdentifiers
 
 @MainActor
-private final class PointingHandCursorCoordinator {
+final class PointingHandCursorCoordinator {
     static let shared = PointingHandCursorCoordinator()
 
     private var activeRegions: Set<UUID> = []
@@ -458,6 +458,9 @@ struct ProviderMark: View {
         case .claude: "ClaudeMark"
         case .codex: "CodexMark"
         case .gemini: "GeminiMark"
+        case .pi: "PiMark"
+        case .omp: "OMPMark"
+        case .hermes: "HermesMark"
         case .opencode: "HarnessMark"
         case .grok: "GrokMark"
         case .harness: "HarnessMark"
@@ -465,7 +468,7 @@ struct ProviderMark: View {
     }
 
     private var isMulticolor: Bool {
-        source == .claude || source == .harness
+        source == .claude || source == .omp || source == .hermes || source == .harness
     }
 
     var body: some View {
@@ -515,6 +518,9 @@ struct ExpandedSessionList: View {
                                 onDisconnect: {
                                     model.disconnectFromNoturcode(session)
                                 },
+                                onRename: {
+                                    model.promptToRename(session)
+                                },
                                 onSelect: {
                                     state.select(session) {
                                         model.jump(to: session)
@@ -551,6 +557,20 @@ struct ExpandedSessionList: View {
                 }
             }
 
+            HStack(spacing: 8) {
+                workspaceButton(title: "Save iTerm layout", icon: "square.and.arrow.down") {
+                    model.saveITermWorkspace()
+                }
+                .accessibilityIdentifier("save-iterm-layout")
+                workspaceButton(title: "Relaunch iTerm", icon: "arrow.clockwise") {
+                    model.restoreITermWorkspace()
+                }
+                .accessibilityIdentifier("relaunch-iterm-layout")
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 15)
+            .padding(.top, 8)
+
             if let staleMessage {
                 HStack(spacing: 7) {
                     Image(systemName: "exclamationmark.circle")
@@ -583,123 +603,25 @@ struct ExpandedSessionList: View {
         }
     }
 
-}
-
-private struct DoneSummaryPreview: View {
-    let session: TrackedSession
-    let done: String
-    let needs: String
-
-    @State private var isPresented = false
-    @State private var isAnchorHovered = false
-    @State private var isPopoverHovered = false
-
-    private var doneBody: String { value(after: "Done:", in: done) }
-    private var needsBody: String { value(after: "Needs you:", in: needs) }
-    private var completionMap: String? { NoturcodeSummaryContract.completionMap(in: session.lastAgentMessage) }
-    private var completionMapWidth: CGFloat {
-        guard let completionMap else { return 322 }
-        let longestLine = completionMap.split(separator: "\n", omittingEmptySubsequences: false)
-            .map(\.count)
-            .max() ?? 0
-        let contentWidth = CGFloat(longestLine) * 6.7 + 48
-        let screenLimit = max(322, (NSScreen.main?.visibleFrame.width ?? 900) - 80)
-        return min(screenLimit, max(322, contentWidth))
-    }
-
-    var body: some View {
-        Text(done)
-            .foregroundStyle(.white.opacity(0.82))
-            .lineLimit(2, reservesSpace: true)
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                isAnchorHovered = hovering
-                if hovering { isPresented = true } else { scheduleDismissal() }
+    private func workspaceButton(
+        title: String, icon: String, action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 10.5, weight: .medium))
             }
-            .popover(isPresented: $isPresented, arrowEdge: .trailing) {
-                popoverContent
-                    .onHover { hovering in
-                        isPopoverHovered = hovering
-                        if !hovering { scheduleDismissal() }
-                    }
-            }
-            .accessibilityIdentifier("done-summary-\(session.id)")
-            .accessibilityHint("Hover to see the complete response summary and its steps")
-    }
-
-    private var popoverContent: some View {
-        VStack(alignment: .leading, spacing: 13) {
-            HStack(spacing: 7) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green.opacity(0.78))
-                Text("THIS RESPONSE")
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(0.8)
-                    .foregroundStyle(.white.opacity(0.42))
-                Spacer(minLength: 0)
-                Text(session.key.source.displayName)
-                    .font(.system(size: 9.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.36))
-            }
-
-            Text(markdown(doneBody))
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white.opacity(0.90))
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-
-            if let completionMap {
-                Text(completionMap)
-                    .font(.system(size: 10.5, weight: .regular, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.78))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .stroke(.white.opacity(0.07), lineWidth: 0.7)
-                }
-                .accessibilityLabel("Completion map")
-                .accessibilityIdentifier("done-summary-ascii-map-\(session.id)")
-            }
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("NEEDS YOU")
-                    .font(.system(size: 8.5, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.30))
-                Text(markdown(needsBody))
-                    .font(.system(size: 10.5, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.58))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
+            .foregroundStyle(.white.opacity(0.72))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(Capsule(style: .continuous).fill(.white.opacity(0.055)))
         }
-        .padding(14)
-        .frame(width: completionMapWidth, alignment: .leading)
-        .background(Color(red: 0.055, green: 0.061, blue: 0.072))
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("done-summary-popover-\(session.id)")
+        .buttonStyle(.plain)
+        .clickableCursor()
     }
 
-    private func value(after prefix: String, in value: String) -> String {
-        guard value.lowercased().hasPrefix(prefix.lowercased()) else { return value }
-        return String(value.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
-    }
-
-    private func markdown(_ value: String) -> AttributedString {
-        (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .full))) ?? AttributedString(value)
-    }
-
-    private func scheduleDismissal() {
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !isAnchorHovered, !isPopoverHovered else { return }
-            isPresented = false
-        }
-    }
 }
 
 private struct SessionRow: View {
@@ -711,6 +633,7 @@ private struct SessionRow: View {
     let onHover: (Bool) -> Void
     let onViewTerminal: () -> Void
     let onDisconnect: () -> Void
+    let onRename: () -> Void
     let onSelect: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -756,10 +679,30 @@ private struct SessionRow: View {
         return (done, needs)
     }
 
+    private var actionableNeed: String? {
+        guard let needs = structuredSummary?.needs else { return nil }
+        let value = needs
+            .replacingOccurrences(of: "Needs you:", with: "", options: [.caseInsensitive, .anchored])
+            .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            .lowercased()
+        guard !value.isEmpty,
+              value != "nothing",
+              value != "none",
+              value != "no action needed" else { return nil }
+        return needs
+    }
+
+    private var remoteHost: String? {
+        guard let host = session.terminal?.identity?.remoteHost?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty else { return nil }
+        return host
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 9) {
-                    SessionMarble(session: session, size: 22, animate: isHovered)
+                    SessionMarble(session: session, size: 28, animate: true)
                     HStack(spacing: 5) {
                         if session.key.source != .codex {
                             ProviderMark(source: session.key.source, size: 13)
@@ -769,6 +712,29 @@ private struct SessionRow: View {
                             .foregroundStyle(.white.opacity(0.95))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
+                        if let remoteHost {
+                            HStack(spacing: 3) {
+                                Image(systemName: "network")
+                                Text("SSH")
+                            }
+                            .font(.system(size: 8.5, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.58))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(.white.opacity(0.065), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(.white.opacity(0.10), lineWidth: 0.6)
+                            }
+                            .help("SSH: \(remoteHost)")
+                            .accessibilityLabel("Remote SSH session on \(remoteHost)")
+                        }
+                        if session.state == .done {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Color(red: 0.60, green: 1.0, blue: 0.22).opacity(0.88))
+                                .accessibilityLabel("Finished")
+                        }
                     }
                     Spacer(minLength: 6)
                     if !session.activeSubagents.isEmpty {
@@ -776,35 +742,57 @@ private struct SessionRow: View {
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundStyle(.white.opacity(0.46))
                     }
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        Text("\(session.state.displayName) · \(DurationFormatting.relative(from: session.stateChangedAt, to: context.date))")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundStyle(.white.opacity(session.state.needsAttention ? 0.9 : 0.58))
+                    if session.state == .done {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(DurationFormatting.relative(from: session.stateChangedAt, to: context.date))
+                                .font(.system(size: 12, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white.opacity(0.78))
+                                .lineLimit(1)
+                        }
+                    } else if session.state == .askingYou || session.state == .failed {
+                        Text(session.state.displayName)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.9))
                             .lineLimit(1)
                     }
+                    Button(action: onDisconnect) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.50))
+                            .frame(width: 21, height: 21)
+                            .background(.white.opacity(0.06), in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .clickableCursor()
+                    .help("Disconnect from Noturcode — keeps the terminal and agent running")
+                    .accessibilityLabel("Disconnect from Noturcode")
+                    .accessibilityHint("Removes this card without stopping the terminal session")
+                    .accessibilityIdentifier("disconnect-noturcode-\(session.id)")
                 }
 
                 if let summary = structuredSummary {
                     VStack(alignment: .leading, spacing: 2) {
-                        DoneSummaryPreview(
-                            session: session,
-                            done: summary.done,
-                            needs: summary.needs
-                        )
-                        Text(summary.needs)
-                            .foregroundStyle(.white.opacity(0.56))
-                            .lineLimit(1)
+                        Text(summary.done)
+                            .foregroundStyle(.white.opacity(0.82))
+                            .lineLimit(2, reservesSpace: true)
+                            .accessibilityIdentifier("done-summary-\(session.id)")
+                        if let actionableNeed {
+                            Text(actionableNeed)
+                                .foregroundStyle(.white.opacity(0.56))
+                                .lineLimit(1)
+                        }
                     }
                     .font(.system(size: 11.5, weight: .regular))
-                    .padding(.leading, 31)
+                    .padding(.leading, 37)
                     .contentTransition(.opacity)
                 } else {
                     Text("“\(subject)”")
                         .font(.system(size: 12, weight: .regular))
                         .foregroundStyle(.white.opacity(0.72))
                         .lineLimit(2)
-                        .padding(.leading, 31)
+                        .padding(.leading, 37)
                         .contentTransition(.opacity)
                 }
 
@@ -821,20 +809,6 @@ private struct SessionRow: View {
                         .truncationMode(.middle)
                     }
                     Spacer(minLength: 8)
-                    Button(action: onDisconnect) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 9.5, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.50))
-                            .frame(width: 21, height: 21)
-                            .background(.white.opacity(0.06), in: Circle())
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .clickableCursor()
-                    .help("Disconnect from Noturcode — keeps the terminal and agent running")
-                    .accessibilityLabel("Disconnect from Noturcode")
-                    .accessibilityHint("Removes this card without stopping the terminal session")
-                    .accessibilityIdentifier("disconnect-noturcode-\(session.id)")
                     Button(action: onViewTerminal) {
                         HStack(spacing: 4) {
                             Image(systemName: "bubble.left.and.bubble.right")
@@ -853,7 +827,7 @@ private struct SessionRow: View {
                 }
                     .font(.system(size: 10.5, weight: .regular))
                     .foregroundStyle(.white.opacity(0.43))
-                    .padding(.leading, 31)
+                    .padding(.leading, 37)
 
         }
         .padding(.horizontal, 9)
@@ -865,9 +839,12 @@ private struct SessionRow: View {
         }
         .overlay {
             if isUnreadFinished {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color(red: 0.60, green: 1.0, blue: 0.22).opacity(0.78), lineWidth: 1.15)
-                    .shadow(color: Color(red: 0.60, green: 1.0, blue: 0.22).opacity(0.16), radius: 5)
+                NodaConicGlow(
+                    isActive: true,
+                    reduceMotion: reduceMotion,
+                    color: NSColor(red: 0.60, green: 1.0, blue: 0.22, alpha: 1),
+                    cornerRadius: 10
+                )
                     .accessibilityElement()
                     .accessibilityLabel("Finished session, unread")
                     .accessibilityIdentifier("unread-completion-\(session.id)")
@@ -880,6 +857,11 @@ private struct SessionRow: View {
         .onTapGesture(perform: onSelect)
         .frame(maxWidth: .infinity)
         .onHover(perform: onHover)
+        .contextMenu {
+            Button("Rename session…", action: onRename)
+            Divider()
+            Button("Disconnect from Noturcode", action: onDisconnect)
+        }
         .clickableCursor()
         .animation(reduceMotion ? nil : .snappy(duration: 0.18, extraBounce: 0), value: isHovered)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: isPressed)
@@ -1111,7 +1093,8 @@ struct TerminalViewportContent: View {
                 .help(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
                 .accessibilityLabel(isSidebarVisible ? "Hide sidebar" : "Show sidebar")
                 .accessibilityIdentifier("toggle-chat-sidebar")
-                if session.key.source == .claude || session.key.source == .codex {
+                if session.key.source == .claude || session.key.source == .codex
+                    || session.key.source == .pi || session.key.source == .omp {
                     Button(action: compactSession) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.right.and.arrow.up.left")
@@ -1520,9 +1503,10 @@ struct TerminalViewportContent: View {
     }
 
     private var transcriptModels: [String] {
-        displayedTranscriptEntries.compactMap(\.model).reduce(into: [String]()) { values, model in
-            if !values.contains(model) { values.append(model) }
-        }
+        ([session.model].compactMap { $0 } + displayedTranscriptEntries.compactMap(\.model))
+            .reduce(into: [String]()) { values, model in
+                if !values.contains(model) { values.append(model) }
+            }
     }
 
     private var shouldShowSummaryCard: Bool {
@@ -1580,9 +1564,9 @@ struct TerminalViewportContent: View {
         var nodes = [WorkflowNode(
             id: "session",
             title: session.name,
-            subtitle: "session chat",
+            subtitle: session.agentRole ?? "session chat",
             detail: activity,
-            model: transcriptModels.last,
+            model: transcriptModels.last ?? session.model,
             icon: "circle.hexagongrid",
             depth: 0,
             isLive: session.state == .working || session.state == .askingYou
@@ -1666,6 +1650,14 @@ struct TerminalViewportContent: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Label(sessionLabel, systemImage: "terminal")
+                if let provider = session.provider, let model = session.model {
+                    Text("\(provider)/\(model)")
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                if let theme = session.theme {
+                    Text("theme: \(theme)")
+                }
                 Text(projectPath)
                     .lineLimit(2)
                     .truncationMode(.middle)

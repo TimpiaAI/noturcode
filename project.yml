@@ -49,19 +49,23 @@ targets:
         script: |
           set -e
           payload="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/IntegrationPayload"
+          rm -rf "$payload"
           mkdir -p "$payload/bin" "$payload/integrations"
           cp "$BUILT_PRODUCTS_DIR/noturcode-bridge" "$payload/bin/noturcode-bridge"
           cp "$SRCROOT/Integrations/claude-hooks.fragment.json" "$payload/integrations/"
           cp "$SRCROOT/Integrations/codex-hooks.fragment.json" "$payload/integrations/"
           cp "$SRCROOT/Integrations/gemini-hooks.fragment.json" "$payload/integrations/"
+          cp "$SRCROOT/Integrations/noturcode-pi-extension.ts" "$payload/integrations/"
+          cp -R "$SRCROOT/Integrations/noturcode-hermes-plugin" "$payload/integrations/"
           cp "$SRCROOT/Integrations/claude-nc-skill/SKILL.md" "$payload/integrations/claude-nc-skill.md"
-          cp "$SRCROOT/Integrations/noturcode-summary-skill/SKILL.md" "$payload/integrations/noturcode-summary-skill.md"
           cp "$SRCROOT/Integrations/iterm2-ask-noturcode.py" "$payload/integrations/"
+          cp "$SRCROOT/Integrations/iterm2-workspace.py" "$payload/integrations/"
           cp "$SRCROOT/Integrations/noturcode-cli.zsh" "$payload/integrations/"
           cp "$SRCROOT/Integrations/noturcode-shell.zsh" "$payload/integrations/"
           cp "$SRCROOT/Integrations/noturcode-agent.py" "$payload/integrations/"
           chmod 0755 "$payload/bin/noturcode-bridge"
           chmod 0755 "$payload/integrations/iterm2-ask-noturcode.py"
+          chmod 0755 "$payload/integrations/iterm2-workspace.py"
           chmod 0755 "$payload/integrations/noturcode-cli.zsh"
           chmod 0755 "$payload/integrations/noturcode-agent.py"
     info:
@@ -75,7 +79,7 @@ targets:
         LSMinimumSystemVersion: "15.0"
         NSHighResolutionCapable: true
         NSPrefersDisplaySafeAreaCompatibilityMode: false
-        NSAppleEventsUsageDescription: Noturcode uses iTerm2's public scripting interface to show connected pane text, navigate when you click, and send only prompts you explicitly submit.
+        NSAppleEventsUsageDescription: Noturcode uses public scripting interfaces to navigate to the iTerm2 pane or browser tab that you explicitly select.
         NSHumanReadableCopyright: Copyright 2026 Noturcode
     entitlements:
       path: Resources/Noturcode.entitlements

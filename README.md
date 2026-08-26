@@ -4,7 +4,7 @@
 
 <h1 align="center">Noturcode</h1>
 
-<p align="center"><strong>Open-source mission control for Claude Code, Codex, and coding-agent teams on macOS.</strong></p>
+<p align="center"><strong>Open-source session control for Claude Code, Codex, Pi, OMP, Hermes Agent, OpenCode, and coding-agent teams on macOS.</strong></p>
 
 <p align="center">
   See every local agent at a glance, return to the exact iTerm2 pane, and open the real conversation, tools, files, and subagents without replacing your terminal.
@@ -29,7 +29,7 @@ Noturcode is a small native companion for the terminal you already use:
 
 - **Glance, then disappear.** Working, waiting, failed, and unread-completion states live in the notch or a compact external-display island.
 - **Return to the actual pane.** Session identity is captured when the agent connects; a click asks iTerm2 to reveal that exact session and visibly reports stale targets.
-- **Read the real conversation.** The desktop workspace reconstructs local Claude Code and Codex JSONL, including Markdown, syntax-highlighted code, tool batches, files, images, models, and token totals.
+- **Read the real conversation.** The desktop workspace reconstructs source-owned JSONL for Claude Code, Codex, Pi, OMP, and OpenCode. It keeps the harness, provider, model, theme, and agent role as separate data.
 - **Inspect orchestration.** Parent sessions and Claude subagents appear as separate clickable conversations rather than a flat list of anonymous tool calls.
 - **Keep control local.** No account, telemetry, cloud relay, or hosted transcript database. Hooks write to a user-owned Unix socket on the same Mac.
 - **Keep your setup reversible.** Integration setup is explicit, existing hook files are backed up, and the uninstall path removes only Noturcode-owned entries.
@@ -47,7 +47,10 @@ The table is intentionally capability-by-capability. “Detected” does not mea
 | Claude Code | Verified hooks | Local JSONL, tools, tokens, subagents | Exact iTerm pane | No native session creation |
 | OpenAI Codex CLI | Verified hooks; native app-server is experimental | Local JSONL and native stream | Exact iTerm pane or native thread | Native tokens and full subagent threads are missing |
 | Gemini CLI | Experimental hooks and ACP | Current native ACP conversation and tools | Native ACP session | Existing CLI attach, images, tokens, and subagents are missing |
-| OpenCode | Experimental plugin and HTTP/SSE | Native messages/tools plus local SQLite reads | Native local server | Requires an explicit running local server; images and tokens are missing |
+| Pi | Experimental extension | Tree JSONL, tools, models, tokens, theme name, agent tools | Exact terminal pane | No native session creation; custom extension events vary |
+| OMP | Experimental extension | Title-slot/tree JSONL, tools, models, roles, theme mode, task agents | Exact terminal pane | No native session creation; live OMP binary coverage is still limited |
+| Hermes Agent | Experimental plugin | Read-only `state.db` conversation, tools, models, tokens, profiles, and delegates | Exact terminal pane | Local CLI sessions only; gateway chats are not shown |
+| OpenCode | Experimental plugin and HTTP/SSE | Native messages/tools plus local SQLite reads; child agents stay under their parent | Native local server | Requires an explicit running local server; images and tokens are missing |
 | Grok | Experimental ACP only | Current native ACP conversation and tools | Native ACP session | No hooks, discovery, existing-session attach, images, tokens, or subagents |
 
 | Host | Exact pane return | Prompt delivery | Notes |
@@ -105,6 +108,14 @@ The remote helper runs as your SSH user. It needs Python 3 and OpenSSH, but no r
 
 ## Connect a session
 
+After setup, new Claude, Codex, Gemini, Pi, OMP, Hermes Agent, and OpenCode sessions report themselves to Noturcode. Harness names stay separate from the selected model.
+
+The same action works in an SSH pane that already has the Noturcode remote helper.
+It adds a private Unix-socket forward to that live SSH connection. It does not open
+a second SSH login. Image paste uses the same forward.
+
+The command forms remain available:
+
 Start a new Claude Code session in iTerm2, then run:
 
 ```text
@@ -117,7 +128,7 @@ Codex validates slash commands before hooks, so use the bare form:
 nc website-redesign
 ```
 
-Disconnect only the Noturcode card—without stopping the agent—with `/nc stop` in Claude or `nc stop` in Codex. You can also disconnect from the app.
+Pi, OMP, and Hermes Agent provide `/nc <name>` and `/nc stop` through their Noturcode integration. Disconnecting removes only the Noturcode card. It does not stop the agent.
 
 ## Permissions
 

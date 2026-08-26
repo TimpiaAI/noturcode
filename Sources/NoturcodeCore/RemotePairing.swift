@@ -69,6 +69,68 @@ public struct RemoteHookResponse: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemoteImagePollRequest: Codable, Equatable, Sendable {
+    public let type: String
+    public let token: String
+    public let deviceID: String
+    public let terminalSessionID: String
+    public let attachmentID: String?
+    public let offset: Int
+
+    public init(token: String, deviceID: String, terminalSessionID: String,
+                attachmentID: String? = nil, offset: Int = 0) {
+        type = "remoteImagePoll"
+        self.token = token
+        self.deviceID = deviceID
+        self.terminalSessionID = terminalSessionID
+        self.attachmentID = attachmentID
+        self.offset = offset
+    }
+}
+
+public struct RemoteImagePollResponse: Codable, Equatable, Sendable {
+    public let ok: Bool
+    public let attachmentID: String?
+    public let fileName: String?
+    public let totalBytes: Int?
+    public let offset: Int?
+    public let chunk: Data?
+    public let error: String?
+
+    public init(ok: Bool, attachmentID: String? = nil, fileName: String? = nil,
+                totalBytes: Int? = nil, offset: Int? = nil, chunk: Data? = nil,
+                error: String? = nil) {
+        self.ok = ok
+        self.attachmentID = attachmentID
+        self.fileName = fileName
+        self.totalBytes = totalBytes
+        self.offset = offset
+        self.chunk = chunk
+        self.error = error
+    }
+}
+
+public struct RemoteImageReadyRequest: Codable, Equatable, Sendable {
+    public let type: String
+    public let token: String
+    public let deviceID: String
+    public let terminalSessionID: String
+    public let attachmentID: String
+    public let remotePath: String?
+    public let error: String?
+
+    public init(token: String, deviceID: String, terminalSessionID: String,
+                attachmentID: String, remotePath: String? = nil, error: String? = nil) {
+        type = "remoteImageReady"
+        self.token = token
+        self.deviceID = deviceID
+        self.terminalSessionID = terminalSessionID
+        self.attachmentID = attachmentID
+        self.remotePath = remotePath
+        self.error = error
+    }
+}
+
 public struct RemotePairingCode: Codable, Equatable, Sendable {
     public let code: String
     public let hostHint: String

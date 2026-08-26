@@ -14,13 +14,18 @@ public struct ProcessAncestor: Equatable, Sendable {
 }
 
 public enum ProcessAncestry {
+    private static let supportedAgentNames: Set<String> = [
+        "codex", "claude", "gemini", "pi", "omp", "hermes", "hermes-agent",
+        "hermes-acp", "opencode", "grok", "node", "bun"
+    ]
+
     public static func agentProcessID(startingAt startPID: Int32 = getppid()) -> Int32? {
         var pid = startPID
         var fallback: Int32?
         for _ in 0..<16 where pid > 1 {
             guard let ancestor = inspect(pid: pid) else { break }
             let name = URL(fileURLWithPath: ancestor.command).lastPathComponent.lowercased()
-            if name == "codex" || name == "claude" || name.hasPrefix("codex-") || name.hasPrefix("claude-") {
+            if isAgentProcess(ancestor.command) && name != "node" && name != "bun" {
                 return pid
             }
             if fallback == nil, name == "node" || name == "bun" {
@@ -28,7 +33,17 @@ public enum ProcessAncestry {
             }
             pid = ancestor.parentPID
         }
-        return fallback ?? startPID
+        return fallback
+    }
+
+    public static func isAgentProcess(_ command: String) -> Bool {
+        let normalized = command.lowercased()
+        let name = URL(fileURLWithPath: command).lastPathComponent.lowercased()
+        let isHermesPython = normalized.contains("/.hermes/hermes-agent/venv/bin/python")
+        return supportedAgentNames.contains(name)
+            || name.hasPrefix("codex-")
+            || name.hasPrefix("claude-")
+            || isHermesPython
     }
 
     public static func inspect(pid: Int32) -> ProcessAncestor? {
